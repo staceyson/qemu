@@ -64,3 +64,7 @@
 [submodule "roms/vbootrom"]
 	path = roms/vbootrom
 	url = https://gitlab.com/qemu-project/vbootrom.git
+[submodule "trace/cheri-perfetto"]
+	path = trace_extra/cheri-perfetto
+	url = https://github.com/qwattash/cheri-perfetto.git
+	branch = cheri-perfetto

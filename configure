@@ -357,6 +357,7 @@ pvrdma="$default_feature"
 gprof="no"
 debug_tcg="no"
 tcg_log_instr="yes"
+tcg_log_instr_perfetto="yes"
 trace_stats="no"
 rvfi_dii="no"
 debug="no"
@@ -1039,6 +1040,10 @@ for opt do
   --enable-tcg-log-instr) tcg_log_instr="yes"
   ;;
   --disable-tcg-log-instr) tcg_log_instr="no"
+  ;;
+  --enable-perfetto-log-instr) tcg_log_instr_perfetto="yes"
+  ;;
+  --disable-perfetto-log-instr) tcg_log_instr_perfetto="no"
   ;;
   --enable-trace-stats) trace_stats="yes"
   ;;
@@ -5519,6 +5524,9 @@ if test "$debug_tcg" = "yes" ; then
 fi
 if test "$tcg_log_instr" = "yes" ; then
   echo "CONFIG_TCG_LOG_INSTR=y" >> $config_host_mak
+fi
+if test "$tcg_log_instr_perfetto" = "yes" ; then
+    echo "CONFIG_TRACE_PERFETTO=y" >> $config_host_mak
 fi
 if test "$trace_stats" = "yes" ; then
     echo "CONFIG_TRACE_STATS=y" >> $config_host_mak

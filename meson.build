@@ -1685,7 +1685,7 @@ qapi_gen_depends = [ meson.source_root() / 'scripts/qapi/__init__.py',
 
 tracetool = [
   python, files('scripts/tracetool.py'),
-   '--backend=' + config_host['TRACE_BACKENDS']
+  '--backend=' + config_host['TRACE_BACKENDS']
 ]
 tracetool_depends = files(
   'scripts/tracetool/backend/log.py',
@@ -1906,12 +1906,10 @@ libqemuutil = static_library('qemuutil',
                              dependencies: [util_ss.dependencies(), m, glib, socket, malloc])
 
 qemuutil_libs = [libqemuutil]
-if 'CONFIG_TRACE_STATS' in config_host
-    subdir('stats')
-    qemuutil_libs += libqemustats
-endif
+subdir('trace_extra')
 
 qemuutil = declare_dependency(link_with: qemuutil_libs,
+                              sources: genh + version_res)
 
 if have_system or have_user
   decodetree = generator(find_program('scripts/decodetree.py'),

@@ -57,6 +57,9 @@ typedef enum {
 #ifdef CONFIG_TRACE_STATS
     QEMU_LOG_INSTR_BACKEND_STATS = 3,
 #endif
+#ifdef CONFIG_TRACE_PERFETTO
+    QEMU_LOG_INSTR_BACKEND_PERFETTO = 4
+#endif
 } qemu_log_instr_backend_t;
 
 extern qemu_log_instr_backend_t qemu_log_instr_backend;

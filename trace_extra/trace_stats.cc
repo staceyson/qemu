@@ -79,7 +79,6 @@ void qemu_stats_addr_range_hist_insert(addr_range_hist_t handle, uint64_t start,
 void qemu_stats_addr_range_hist_dump(addr_range_hist_t handle, int fd,
                                      bool csv_header)
 {
-    printf("XXX-AM: STATS DUMP\n");
     auto &hist = handle2imap(handle);
     io::file_descriptor_sink fd_sink(fd, io::never_close_handle);
     io::stream<io::file_descriptor_sink> ostream(fd_sink);

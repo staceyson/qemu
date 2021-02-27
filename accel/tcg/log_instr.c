@@ -121,6 +121,15 @@ static trace_backend_hooks_t trace_backends[] = {
       .emit_instr = emit_stats_entry,
       .emit_events = emit_stats_events },
 #endif
+#ifdef CONFIG_TRACE_PERFETTO
+/* { */
+/*     .init = init_perfetto_backend, */
+/*     .emit_header = NULL, */
+/*     .emit_start = emit_perfetto_start, */
+/*     .emit_stop = emit_perfetto_stop, */
+/*     .emit_entry = emit_perfetto_entry */
+/* } */
+#endif
 };
 
 /* Existing trace filters list, indexed by cpu_log_instr_filter_t */
@@ -1385,5 +1394,4 @@ void qemu_log_instr_mem_filter_update()
 static cpu_log_instr_filter_fn_t trace_filters[] = {
     entry_mem_regions_filter,
 };
-
 #endif /* CONFIG_TCG_LOG_INSTR */
