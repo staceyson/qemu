@@ -2,10 +2,6 @@ DEF_HELPER_3(raise_exception_err, noreturn, env, i32, int)
 DEF_HELPER_2(raise_exception, noreturn, env, i32)
 DEF_HELPER_1(raise_exception_debug, noreturn, env)
 
-#ifndef CONFIG_USER_ONLY
-DEF_HELPER_1(do_semihosting, void, env)
-#endif
-
 #ifdef TARGET_MIPS64
 DEF_HELPER_4(sdl, void, env, tl, tl, int)
 DEF_HELPER_4(sdr, void, env, tl, tl, int)
@@ -43,142 +39,6 @@ DEF_HELPER_FLAGS_1(dbitswap, TCG_CALL_NO_RWG_SE, tl, tl)
 DEF_HELPER_FLAGS_4(rotx, TCG_CALL_NO_RWG_SE, tl, tl, i32, i32, i32)
 
 #ifndef CONFIG_USER_ONLY
-/* CP0 helpers */
-DEF_HELPER_1(mfc0_mvpcontrol, tl, env)
-DEF_HELPER_1(mfc0_mvpconf0, tl, env)
-DEF_HELPER_1(mfc0_mvpconf1, tl, env)
-DEF_HELPER_1(mftc0_vpecontrol, tl, env)
-DEF_HELPER_1(mftc0_vpeconf0, tl, env)
-DEF_HELPER_1(mfc0_random, tl, env)
-DEF_HELPER_1(mfc0_tcstatus, tl, env)
-DEF_HELPER_1(mftc0_tcstatus, tl, env)
-DEF_HELPER_1(mfc0_tcbind, tl, env)
-DEF_HELPER_1(mftc0_tcbind, tl, env)
-DEF_HELPER_1(mfc0_tcrestart, tl, env)
-DEF_HELPER_1(mftc0_tcrestart, tl, env)
-DEF_HELPER_1(mfc0_tchalt, tl, env)
-DEF_HELPER_1(mftc0_tchalt, tl, env)
-DEF_HELPER_1(mfc0_tccontext, tl, env)
-DEF_HELPER_1(mftc0_tccontext, tl, env)
-DEF_HELPER_1(mfc0_tcschedule, tl, env)
-DEF_HELPER_1(mftc0_tcschedule, tl, env)
-DEF_HELPER_1(mfc0_tcschefback, tl, env)
-DEF_HELPER_1(mftc0_tcschefback, tl, env)
-DEF_HELPER_1(mfc0_count, tl, env)
-DEF_HELPER_1(mfc0_saar, tl, env)
-DEF_HELPER_1(mfhc0_saar, tl, env)
-DEF_HELPER_1(mftc0_entryhi, tl, env)
-DEF_HELPER_1(mftc0_status, tl, env)
-DEF_HELPER_1(mftc0_cause, tl, env)
-DEF_HELPER_1(mftc0_epc, tl, env)
-DEF_HELPER_1(mftc0_ebase, tl, env)
-DEF_HELPER_2(mftc0_configx, tl, env, tl)
-DEF_HELPER_1(mfc0_lladdr, tl, env)
-DEF_HELPER_1(mfc0_maar, tl, env)
-DEF_HELPER_1(mfhc0_maar, tl, env)
-DEF_HELPER_2(mfc0_watchlo, tl, env, i32)
-DEF_HELPER_2(mfc0_watchhi, tl, env, i32)
-DEF_HELPER_2(mfhc0_watchhi, tl, env, i32)
-DEF_HELPER_1(mfc0_debug, tl, env)
-DEF_HELPER_1(mftc0_debug, tl, env)
-/* Break after n cycles have been executed */
-DEF_HELPER_1(check_breakcount, void, env)
-#ifdef TARGET_MIPS64
-DEF_HELPER_1(dmfc0_tcrestart, tl, env)
-DEF_HELPER_1(dmfc0_tchalt, tl, env)
-DEF_HELPER_1(dmfc0_tccontext, tl, env)
-DEF_HELPER_1(dmfc0_tcschedule, tl, env)
-DEF_HELPER_1(dmfc0_tcschefback, tl, env)
-DEF_HELPER_1(dmfc0_lladdr, tl, env)
-DEF_HELPER_1(dmfc0_maar, tl, env)
-DEF_HELPER_2(dmfc0_watchlo, tl, env, i32)
-DEF_HELPER_2(dmfc0_watchhi, tl, env, i32)
-DEF_HELPER_1(dmfc0_saar, tl, env)
-#endif /* TARGET_MIPS64 */
-
-DEF_HELPER_2(mtc0_index, void, env, tl)
-DEF_HELPER_2(mtc0_mvpcontrol, void, env, tl)
-DEF_HELPER_2(mtc0_vpecontrol, void, env, tl)
-DEF_HELPER_2(mttc0_vpecontrol, void, env, tl)
-DEF_HELPER_2(mtc0_vpeconf0, void, env, tl)
-DEF_HELPER_2(mttc0_vpeconf0, void, env, tl)
-DEF_HELPER_2(mtc0_vpeconf1, void, env, tl)
-DEF_HELPER_2(mtc0_yqmask, void, env, tl)
-DEF_HELPER_2(mtc0_vpeopt, void, env, tl)
-DEF_HELPER_2(mtc0_entrylo0, void, env, tl)
-DEF_HELPER_2(mtc0_tcstatus, void, env, tl)
-DEF_HELPER_2(mttc0_tcstatus, void, env, tl)
-DEF_HELPER_2(mtc0_tcbind, void, env, tl)
-DEF_HELPER_2(mttc0_tcbind, void, env, tl)
-DEF_HELPER_2(mtc0_tcrestart, void, env, tl)
-DEF_HELPER_2(mttc0_tcrestart, void, env, tl)
-DEF_HELPER_2(mtc0_tchalt, void, env, tl)
-DEF_HELPER_2(mttc0_tchalt, void, env, tl)
-DEF_HELPER_2(mtc0_tccontext, void, env, tl)
-DEF_HELPER_2(mttc0_tccontext, void, env, tl)
-DEF_HELPER_2(mtc0_tcschedule, void, env, tl)
-DEF_HELPER_2(mttc0_tcschedule, void, env, tl)
-DEF_HELPER_2(mtc0_tcschefback, void, env, tl)
-DEF_HELPER_2(mttc0_tcschefback, void, env, tl)
-DEF_HELPER_2(mtc0_entrylo1, void, env, tl)
-DEF_HELPER_2(mtc0_context, void, env, tl)
-DEF_HELPER_2(mtc0_memorymapid, void, env, tl)
-DEF_HELPER_2(mtc0_pagemask, void, env, tl)
-DEF_HELPER_2(mtc0_pagegrain, void, env, tl)
-DEF_HELPER_2(mtc0_segctl0, void, env, tl)
-DEF_HELPER_2(mtc0_segctl1, void, env, tl)
-DEF_HELPER_2(mtc0_segctl2, void, env, tl)
-DEF_HELPER_2(mtc0_pwfield, void, env, tl)
-DEF_HELPER_2(mtc0_pwsize, void, env, tl)
-DEF_HELPER_2(mtc0_wired, void, env, tl)
-DEF_HELPER_2(mtc0_srsconf0, void, env, tl)
-DEF_HELPER_2(mtc0_srsconf1, void, env, tl)
-DEF_HELPER_2(mtc0_srsconf2, void, env, tl)
-DEF_HELPER_2(mtc0_srsconf3, void, env, tl)
-DEF_HELPER_2(mtc0_srsconf4, void, env, tl)
-DEF_HELPER_2(mtc0_hwrena, void, env, tl)
-DEF_HELPER_2(mtc0_pwctl, void, env, tl)
-DEF_HELPER_2(mtc0_count, void, env, tl)
-DEF_HELPER_2(mtc0_saari, void, env, tl)
-DEF_HELPER_2(mtc0_saar, void, env, tl)
-DEF_HELPER_2(mthc0_saar, void, env, tl)
-DEF_HELPER_2(mtc0_entryhi, void, env, tl)
-DEF_HELPER_2(mttc0_entryhi, void, env, tl)
-DEF_HELPER_2(mtc0_compare, void, env, tl)
-DEF_HELPER_2(mtc0_status, void, env, tl)
-DEF_HELPER_2(mttc0_status, void, env, tl)
-DEF_HELPER_2(mtc0_intctl, void, env, tl)
-DEF_HELPER_2(mtc0_srsctl, void, env, tl)
-DEF_HELPER_2(mtc0_cause, void, env, tl)
-DEF_HELPER_2(mttc0_cause, void, env, tl)
-DEF_HELPER_2(mtc0_ebase, void, env, tl)
-DEF_HELPER_2(mttc0_ebase, void, env, tl)
-DEF_HELPER_2(mtc0_config0, void, env, tl)
-DEF_HELPER_2(mtc0_config2, void, env, tl)
-DEF_HELPER_2(mtc0_config3, void, env, tl)
-DEF_HELPER_2(mtc0_config4, void, env, tl)
-DEF_HELPER_2(mtc0_config5, void, env, tl)
-DEF_HELPER_2(mtc0_lladdr, void, env, tl)
-DEF_HELPER_2(mtc0_maar, void, env, tl)
-DEF_HELPER_2(mthc0_maar, void, env, tl)
-DEF_HELPER_2(mtc0_maari, void, env, tl)
-DEF_HELPER_3(mtc0_watchlo, void, env, tl, i32)
-DEF_HELPER_3(mtc0_watchhi, void, env, tl, i32)
-DEF_HELPER_3(mthc0_watchhi, void, env, tl, i32)
-DEF_HELPER_2(mtc0_xcontext, void, env, tl)
-DEF_HELPER_2(mtc0_framemask, void, env, tl)
-DEF_HELPER_2(mtc0_debug, void, env, tl)
-DEF_HELPER_2(mttc0_debug, void, env, tl)
-DEF_HELPER_2(mtc0_performance0, void, env, tl)
-DEF_HELPER_2(mtc0_errctl, void, env, tl)
-DEF_HELPER_2(mtc0_taglo, void, env, tl)
-DEF_HELPER_2(mtc0_datalo, void, env, tl)
-DEF_HELPER_2(mtc0_taghi, void, env, tl)
-DEF_HELPER_2(mtc0_datahi, void, env, tl)
-
-// Dump MIPS register state
-DEF_HELPER_2(mtc0_dumpstate, void, env, tl)
-
 // QEMU-CHERI extension:
 DEF_HELPER_1(mfc0_rtc64, i64, env)
 DEF_HELPER_2(mtc0_rtc64, void, env, i64)
@@ -194,9 +54,13 @@ DEF_HELPER_FLAGS_3(mips_log_instr32, TCG_CALL_NO_WG, void, env, tl, i32)
 DEF_HELPER_FLAGS_1(mips_log_instr_drop, TCG_CALL_NO_WG, void, env)
 /* Extra MIPS-only helpers */
 DEF_HELPER_2(cheri_debug_message, void, env, i64)
-#endif
-
+// Dump MIPS register state
+DEF_HELPER_2(mtc0_dumpstate, void, env, tl)
+#endif /* CONFIG_TCG_LOG_INSTR */
+/* Break after n cycles have been executed */
+DEF_HELPER_1(check_breakcount, void, env)
 DEF_HELPER_2(magic_library_function, void, env, tl)
+DEF_HELPER_1(smp_yield, void, env)
 
 #if defined(TARGET_CHERI)
 #include "cheri-helper-common.h"
@@ -243,34 +107,14 @@ DEF_HELPER_3(cllc_without_tcg, void, env, i32, i32)
 DEF_HELPER_2(mtc0_capfilter_lo, void, env, tl)
 DEF_HELPER_2(mtc0_capfilter_hi, void, env, tl)
 DEF_HELPER_2(mtc0_capfilter_perms, void, env, tl)
-#endif
 
-DEF_HELPER_1(smp_yield, void, env)
-
-#if defined(TARGET_MIPS64)
-DEF_HELPER_2(dmtc0_entrylo0, void, env, i64)
-DEF_HELPER_2(dmtc0_entrylo1, void, env, i64)
-#endif
-
-/* MIPS MT functions */
-DEF_HELPER_2(mftgpr, tl, env, i32)
-DEF_HELPER_2(mftlo, tl, env, i32)
-DEF_HELPER_2(mfthi, tl, env, i32)
-DEF_HELPER_2(mftacx, tl, env, i32)
-DEF_HELPER_1(mftdsp, tl, env)
-DEF_HELPER_3(mttgpr, void, env, tl, i32)
-DEF_HELPER_3(mttlo, void, env, tl, i32)
-DEF_HELPER_3(mtthi, void, env, tl, i32)
-DEF_HELPER_3(mttacx, void, env, tl, i32)
-DEF_HELPER_2(mttdsp, void, env, tl)
-DEF_HELPER_0(dmt, tl)
-DEF_HELPER_0(emt, tl)
-DEF_HELPER_1(dvpe, tl, env)
-DEF_HELPER_1(evpe, tl, env)
-
-/* R6 Multi-threading */
-DEF_HELPER_1(dvp, tl, env)
-DEF_HELPER_1(evp, tl, env)
+/* Special functions */
+/* cannot access EPC directly since it is the offset of EPCC */
+DEF_HELPER_1(mfc0_epc, tl, env)
+DEF_HELPER_2(mtc0_epc, void, env, tl)
+DEF_HELPER_1(mfc0_error_epc, tl, env)
+DEF_HELPER_2(mtc0_error_epc, void, env, tl)
+#endif /* TARGET_CHERI */
 #endif /* !CONFIG_USER_ONLY */
 
 /* microMIPS functions */
@@ -437,28 +281,6 @@ FOP_PROTO(sune)
 FOP_PROTO(sne)
 #undef FOP_PROTO
 
-/* Special functions */
-#ifndef CONFIG_USER_ONLY
-#if defined(TARGET_CHERI)
-/* cannot access EPC directly since it is the offset of EPCC */
-DEF_HELPER_1(mfc0_epc, tl, env)
-DEF_HELPER_2(mtc0_epc, void, env, tl)
-DEF_HELPER_1(mfc0_error_epc, tl, env)
-DEF_HELPER_2(mtc0_error_epc, void, env, tl)
-#endif
-DEF_HELPER_1(tlbwi, void, env)
-DEF_HELPER_1(tlbwr, void, env)
-DEF_HELPER_1(tlbp, void, env)
-DEF_HELPER_1(tlbr, void, env)
-DEF_HELPER_1(tlbinv, void, env)
-DEF_HELPER_1(tlbinvf, void, env)
-DEF_HELPER_1(di, tl, env)
-DEF_HELPER_1(ei, tl, env)
-DEF_HELPER_1(eret, void, env)
-DEF_HELPER_1(eretnc, void, env)
-DEF_HELPER_1(deret, void, env)
-DEF_HELPER_3(ginvt, void, env, tl, i32)
-#endif /* !CONFIG_USER_ONLY */
 DEF_HELPER_1(rdhwr_cpunum, tl, env)
 DEF_HELPER_1(rdhwr_synci_step, tl, env)
 DEF_HELPER_1(rdhwr_cc, tl, env)
@@ -869,6 +691,8 @@ DEF_HELPER_FLAGS_3(dmthlip, 0, void, tl, tl, env)
 DEF_HELPER_FLAGS_3(wrdsp, 0, void, tl, tl, env)
 DEF_HELPER_FLAGS_2(rddsp, 0, tl, tl, env)
 
-DEF_HELPER_3(cache, void, env, tl, i32)
+#ifndef CONFIG_USER_ONLY
+#include "tcg/sysemu_helper.h.inc"
+#endif /* !CONFIG_USER_ONLY */
 
-#include "msa_helper.h.inc"
+#include "tcg/msa_helper.h.inc"

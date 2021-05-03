@@ -9,8 +9,12 @@
 #define MIPS_INTERNAL_H
 
 #include "exec/memattrs.h"
+#ifdef CONFIG_TCG
 #include "qemu/log.h"
 #include "exec/log_instr.h"
+#include "tcg/tcg-internal.h"
+#endif
+
 
 /*
  * MMU types, the first four entries have the same layout as the
@@ -73,6 +77,15 @@ struct mips_def_t {
     int32_t SAARP;
 };
 
+extern const char regnames[32][4];
+extern const char fregnames[32][4];
+extern const char regnames_HI[4][4];
+extern const char regnames_LO[4][4];
+extern const char mips_cop0_regnames[32*8][32];
+#ifdef TARGET_CHERI
+extern const char mips_cheri_hw_regnames[32][10];
+#endif
+
 extern const struct mips_def_t mips_defs[];
 extern const int mips_defs_number;
 
@@ -87,15 +100,39 @@ int mips_gdb_set_sys_reg(CPUMIPSState *env, uint8_t *mem_buf, int n);
 
 void mips_cpu_do_interrupt(CPUState *cpu);
 bool mips_cpu_exec_interrupt(CPUState *cpu, int int_req);
-void mips_cpu_dump_state(CPUState *cpu, FILE *f, int flags);
 hwaddr mips_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
 int mips_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
 int mips_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
-void mips_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
-                                  MMUAccessType access_type,
-                                  int mmu_idx, uintptr_t retaddr);
+
+#define USEG_LIMIT      ((target_ulong)(int32_t)0x7FFFFFFFUL)
+#define KSEG0_BASE      ((target_ulong)(int32_t)0x80000000UL)
+#define KSEG1_BASE      ((target_ulong)(int32_t)0xA0000000UL)
+#define KSEG2_BASE      ((target_ulong)(int32_t)0xC0000000UL)
+#define KSEG3_BASE      ((target_ulong)(int32_t)0xE0000000UL)
+
+#define KVM_KSEG0_BASE  ((target_ulong)(int32_t)0x40000000UL)
+#define KVM_KSEG2_BASE  ((target_ulong)(int32_t)0x60000000UL)
 
 #if !defined(CONFIG_USER_ONLY)
+
+enum {
+#ifdef TARGET_CHERI
+    TLBRET_S = -5,
+#else
+    TLBRET_XI = -6,
+    TLBRET_RI = -5,
+#endif /* TARGET_CHERI */
+    TLBRET_DIRTY = -4,
+    TLBRET_INVALID = -3,
+    TLBRET_NOMATCH = -2,
+    TLBRET_BADADDR = -1,
+    TLBRET_MATCH = 0
+};
+
+int get_physical_address(CPUMIPSState *env, hwaddr *physical,
+                         int *prot, target_ulong real_address,
+                         MMUAccessType access_type, int mmu_idx);
+hwaddr mips_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
 
 typedef struct r4k_tlb_t r4k_tlb_t;
 struct r4k_tlb_t {
@@ -145,36 +182,15 @@ struct CPUMIPSTLBContext {
     } mmu;
 };
 
-int no_mmu_map_address(CPUMIPSState *env, hwaddr *physical, int *prot,
-                       target_ulong address, MMUAccessType access_type);
-int fixed_mmu_map_address(CPUMIPSState *env, hwaddr *physical, int *prot,
-                          target_ulong address, MMUAccessType access_type);
-int r4k_map_address(CPUMIPSState *env, hwaddr *physical, int *prot,
-                    target_ulong address, MMUAccessType access_type);
-void r4k_helper_tlbwi(CPUMIPSState *env, uintptr_t retpc);
-void r4k_helper_tlbwr(CPUMIPSState *env, uintptr_t retpc);
-void r4k_helper_tlbp(CPUMIPSState *env);
-void r4k_helper_tlbr(CPUMIPSState *env);
-void r4k_helper_tlbinv(CPUMIPSState *env);
-void r4k_helper_tlbinvf(CPUMIPSState *env);
-void r4k_invalidate_tlb(CPUMIPSState *env, int idx, int use_extra);
-bool r4k_lookup_tlb(CPUMIPSState *env, int *matching, bool use_extra);
-uint32_t cpu_mips_get_random(CPUMIPSState *env);
+void sync_c0_status(CPUMIPSState *env, CPUMIPSState *cpu, int tc);
+void cpu_mips_store_status(CPUMIPSState *env, target_ulong val);
+void cpu_mips_store_cause(CPUMIPSState *env, target_ulong val);
 
-void mips_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
-                                    vaddr addr, unsigned size,
-                                    MMUAccessType access_type,
-                                    int mmu_idx, MemTxAttrs attrs,
-                                    MemTxResult response, uintptr_t retaddr);
-hwaddr cpu_mips_translate_address(CPUMIPSState *env, target_ulong address,
-                                  MMUAccessType access_type);
-#endif
+extern const VMStateDescription vmstate_mips_cpu;
+
+#endif /* !CONFIG_USER_ONLY */
 
 #define cpu_signal_handler cpu_mips_signal_handler
-
-#ifndef CONFIG_USER_ONLY
-extern const VMStateDescription vmstate_mips_cpu;
-#endif
 
 static inline bool cpu_mips_hw_interrupts_enabled(CPUMIPSState *env)
 {
@@ -218,8 +234,6 @@ static inline bool cpu_mips_hw_interrupts_pending(CPUMIPSState *env)
     return r;
 }
 
-void mips_tcg_init(void);
-
 void msa_reset(CPUMIPSState *env);
 
 /* cp0_timer.c */
@@ -229,17 +243,20 @@ void cpu_mips_store_compare(CPUMIPSState *env, uint32_t value);
 void cpu_mips_start_count(CPUMIPSState *env);
 void cpu_mips_stop_count(CPUMIPSState *env);
 
+
 uint64_t cpu_mips_get_rtc64 (CPUMIPSState *env);
 void cpu_mips_set_rtc64 (CPUMIPSState *env, uint64_t value);
 
-/* helper.c */
-void mmu_init(CPUMIPSState *env, const mips_def_t *def);
-bool mips_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
-                       MMUAccessType access_type, int mmu_idx,
-                       bool probe, uintptr_t retaddr);
+static inline void mips_env_set_pc(CPUMIPSState *env, target_ulong value)
+{
+    mips_update_pc(env, value & ~(target_ulong)1, /*can_be_unrepresentable=*/false);
+    if (value & 1) {
+        env->hflags |= MIPS_HFLAG_M16;
+    } else {
+        env->hflags &= ~(MIPS_HFLAG_M16);
+    }
+}
 
-/* op_helper.c */
-void update_pagemask(CPUMIPSState *env, target_ulong arg1, int32_t *pagemask);
 
 static inline void restore_pamask(CPUMIPSState *env)
 {
@@ -472,24 +489,6 @@ static inline void compute_hflags(CPUMIPSState *env)
     }
 }
 
-void cpu_mips_tlb_flush(CPUMIPSState *env);
-void sync_c0_status(CPUMIPSState *env, CPUMIPSState *cpu, int tc);
-void cpu_mips_store_status(CPUMIPSState *env, target_ulong val);
-void cpu_mips_store_cause(CPUMIPSState *env, target_ulong val);
-
-const char *mips_exception_name(int32_t exception);
-
-void QEMU_NORETURN do_raise_exception_err(CPUMIPSState *env, MipsExcp exception,
-                                          int error_code, uintptr_t pc);
-
-static inline void QEMU_NORETURN do_raise_exception(CPUMIPSState *env,
-                                                    MipsExcp exception,
-                                                    uintptr_t pc)
-{
-    /* NOTE: pc is a HOST program counter (from GETPC()) and not a MIPS guest pc */
-    do_raise_exception_err(env, exception, env->error_code & EXCP_INST_NOTAVAIL, pc);
-}
-
 static inline void check_hwrena(CPUMIPSState *env, int reg, uintptr_t pc) {
     if ((env->hflags & MIPS_HFLAG_CP0) || (env->CP0_HWREna & (1 << reg))) {
         return;
@@ -561,8 +560,6 @@ void r4k_dump_tlb(CPUMIPSState *env, int idx);
 #endif
 void do_hexdump(GString *strbuf, uint8_t* buffer, target_ulong length,
                 target_ulong vaddr);
-hwaddr do_translate_address(CPUMIPSState *env, target_ulong address,
-                            MMUAccessType access_type, uintptr_t retaddr);
 
 #ifdef TARGET_CHERI
 #include "cheri-helper-utils.h"

@@ -81,6 +81,9 @@ const VMStateDescription vmstate_inactive_fpu = {
 
 static VMStateField vmstate_tc_fields[] = {
     VMSTATE_UINTTL_ARRAY(gpr, TCState, 32),
+#if defined(TARGET_MIPS64)
+    VMSTATE_UINT64_ARRAY(gpr_hi, TCState, 32),
+#endif /* TARGET_MIPS64 */
 #ifdef TARGET_CHERI
     VMSTATE_UINTTL(PCC._cr_cursor, TCState),
 #else
@@ -99,20 +102,22 @@ static VMStateField vmstate_tc_fields[] = {
     VMSTATE_INT32(CP0_Debug_tcstatus, TCState),
     VMSTATE_UINTTL(CP0_UserLocal, TCState),
     VMSTATE_INT32(msacsr, TCState),
+    VMSTATE_UINTTL_ARRAY(mxu_gpr, TCState, NUMBER_OF_MXU_REGISTERS - 1),
+    VMSTATE_UINTTL(mxu_cr, TCState),
     VMSTATE_END_OF_LIST()
 };
 
 const VMStateDescription vmstate_tc = {
     .name = "cpu/tc",
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = vmstate_tc_fields
 };
 
 const VMStateDescription vmstate_inactive_tc = {
     .name = "cpu/inactive_tc",
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = vmstate_tc_fields
 };
 
@@ -231,8 +236,8 @@ const VMStateDescription vmstate_tlb = {
 
 const VMStateDescription vmstate_mips_cpu = {
     .name = "cpu",
-    .version_id = 20,
-    .minimum_version_id = 20,
+    .version_id = 21,
+    .minimum_version_id = 21,
     .post_load = cpu_post_load,
     .fields = (VMStateField[]) {
         /* Active TC */
@@ -259,6 +264,7 @@ const VMStateDescription vmstate_mips_cpu = {
 
         /* Remaining CP0 registers */
         VMSTATE_INT32(env.CP0_Index, MIPSCPU),
+        VMSTATE_INT32(env.CP0_VPControl, MIPSCPU),
         VMSTATE_INT32(env.CP0_Random, MIPSCPU),
         VMSTATE_INT32(env.CP0_VPEControl, MIPSCPU),
         VMSTATE_INT32(env.CP0_VPEConf0, MIPSCPU),
@@ -269,6 +275,7 @@ const VMStateDescription vmstate_mips_cpu = {
         VMSTATE_INT32(env.CP0_VPEOpt, MIPSCPU),
         VMSTATE_UINT64(env.CP0_EntryLo0, MIPSCPU),
         VMSTATE_UINT64(env.CP0_EntryLo1, MIPSCPU),
+        VMSTATE_INT32(env.CP0_GlobalNumber, MIPSCPU),
         VMSTATE_UINTTL(env.CP0_Context, MIPSCPU),
         VMSTATE_INT32(env.CP0_MemoryMapID, MIPSCPU),
         VMSTATE_INT32(env.CP0_PageMask, MIPSCPU),
@@ -307,6 +314,7 @@ const VMStateDescription vmstate_mips_cpu = {
 #endif
         VMSTATE_INT32(env.CP0_PRid, MIPSCPU),
         VMSTATE_UINTTL(env.CP0_EBase, MIPSCPU),
+        VMSTATE_UINTTL(env.CP0_CMGCRBase, MIPSCPU),
         VMSTATE_INT32(env.CP0_Config0, MIPSCPU),
         VMSTATE_INT32(env.CP0_Config1, MIPSCPU),
         VMSTATE_INT32(env.CP0_Config2, MIPSCPU),
@@ -326,6 +334,7 @@ const VMStateDescription vmstate_mips_cpu = {
         VMSTATE_INT32(env.CP0_Debug, MIPSCPU),
         VMSTATE_UINTTL(env.CP0_DEPC, MIPSCPU),
         VMSTATE_INT32(env.CP0_Performance0, MIPSCPU),
+        VMSTATE_INT32(env.CP0_ErrCtl, MIPSCPU),
         VMSTATE_UINT64(env.CP0_TagLo, MIPSCPU),
         VMSTATE_INT32(env.CP0_DataLo, MIPSCPU),
         VMSTATE_INT32(env.CP0_TagHi, MIPSCPU),

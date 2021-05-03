@@ -40,155 +40,84 @@
 #include "qapi/qapi-commands-machine-target.h"
 #include "fpu_helper.h"
 
-#if !defined(CONFIG_USER_ONLY)
-
-/* Called for updates to CP0_Status.  */
-void sync_c0_status(CPUMIPSState *env, CPUMIPSState *cpu, int tc)
-{
-    int32_t tcstatus, *tcst;
-    uint32_t v = cpu->CP0_Status;
-    uint32_t cu, mx, asid, ksu;
-    uint32_t mask = ((1 << CP0TCSt_TCU3)
-                       | (1 << CP0TCSt_TCU2)
-                       | (1 << CP0TCSt_TCU1)
-                       | (1 << CP0TCSt_TCU0)
-                       | (1 << CP0TCSt_TMX)
-                       | (3 << CP0TCSt_TKSU)
-                       | (0xff << CP0TCSt_TASID));
-
-    cu = (v >> CP0St_CU0) & 0xf;
-    mx = (v >> CP0St_MX) & 0x1;
-    ksu = (v >> CP0St_KSU) & 0x3;
-    asid = env->CP0_EntryHi & env->CP0_EntryHi_ASID_mask;
-
-    tcstatus = cu << CP0TCSt_TCU0;
-    tcstatus |= mx << CP0TCSt_TMX;
-    tcstatus |= ksu << CP0TCSt_TKSU;
-    tcstatus |= asid;
-
-    if (tc == cpu->current_tc) {
-        tcst = &cpu->active_tc.CP0_TCStatus;
-    } else {
-        tcst = &cpu->tcs[tc].CP0_TCStatus;
-    }
-
-    *tcst &= ~mask;
-    *tcst |= tcstatus;
-    compute_hflags(cpu);
-}
-
-void cpu_mips_store_status(CPUMIPSState *env, target_ulong val)
-{
-    uint32_t mask = env->CP0_Status_rw_bitmask;
-    target_ulong old = env->CP0_Status;
-
-    if (env->insn_flags & ISA_MIPS_R6) {
-        bool has_supervisor = extract32(mask, CP0St_KSU, 2) == 0x3;
-#if defined(TARGET_MIPS64)
-        uint32_t ksux = (1 << CP0St_KX) & val;
-        ksux |= (ksux >> 1) & val; /* KX = 0 forces SX to be 0 */
-        ksux |= (ksux >> 1) & val; /* SX = 0 forces UX to be 0 */
-        val = (val & ~(7 << CP0St_UX)) | ksux;
-#endif
-        if (has_supervisor && extract32(val, CP0St_KSU, 2) == 0x3) {
-            mask &= ~(3 << CP0St_KSU);
-        }
-        mask &= ~(((1 << CP0St_SR) | (1 << CP0St_NMI)) & val);
-    }
-
-    env->CP0_Status = (old & ~mask) | (val & mask);
-#if defined(TARGET_MIPS64)
-    if ((env->CP0_Status ^ old) & (old & (7 << CP0St_UX))) {
-        /* Access to at least one of the 64-bit segments has been disabled */
-        tlb_flush(env_cpu(env));
-    }
-#endif
-    if (ase_mt_available(env)) {
-        sync_c0_status(env, env, env->current_tc);
-    } else {
-        compute_hflags(env);
-    }
-}
-
-void cpu_mips_store_cause(CPUMIPSState *env, target_ulong val)
-{
-    uint32_t mask = 0x00C00300;
-    uint32_t old = env->CP0_Cause;
-    int i;
-
-    if (env->insn_flags & ISA_MIPS_R2) {
-        mask |= 1 << CP0Ca_DC;
-    }
-    if (env->insn_flags & ISA_MIPS_R6) {
-        mask &= ~((1 << CP0Ca_WP) & val);
-    }
-
-    env->CP0_Cause = (env->CP0_Cause & ~mask) | (val & mask);
-
-    if ((old ^ env->CP0_Cause) & (1 << CP0Ca_DC)) {
-        if (env->CP0_Cause & (1 << CP0Ca_DC)) {
-            cpu_mips_stop_count(env);
-        } else {
-            cpu_mips_start_count(env);
-        }
-    }
-
-    /* Set/reset software interrupts */
-    for (i = 0 ; i < 2 ; i++) {
-        if ((old ^ env->CP0_Cause) & (1 << (CP0Ca_IP + i))) {
-            cpu_mips_soft_irq(env, i, env->CP0_Cause & (1 << (CP0Ca_IP + i)));
-        }
-    }
-}
-
-#endif /* !CONFIG_USER_ONLY */
-
-static const char * const excp_names[EXCP_LAST + 1] = {
-    [EXCP_RESET] = "reset",
-    [EXCP_SRESET] = "soft reset",
-    [EXCP_DSS] = "debug single step",
-    [EXCP_DINT] = "debug interrupt",
-    [EXCP_NMI] = "non-maskable interrupt",
-    [EXCP_MCHECK] = "machine check",
-    [EXCP_EXT_INTERRUPT] = "interrupt",
-    [EXCP_DFWATCH] = "deferred watchpoint",
-    [EXCP_DIB] = "debug instruction breakpoint",
-    [EXCP_IWATCH] = "instruction fetch watchpoint",
-    [EXCP_AdEL] = "address error load",
-    [EXCP_AdES] = "address error store",
-    [EXCP_TLBF] = "TLB refill",
-    [EXCP_IBE] = "instruction bus error",
-    [EXCP_DBp] = "debug breakpoint",
-    [EXCP_SYSCALL] = "syscall",
-    [EXCP_BREAK] = "break",
-    [EXCP_CpU] = "coprocessor unusable",
-    [EXCP_RI] = "reserved instruction",
-    [EXCP_OVERFLOW] = "arithmetic overflow",
-    [EXCP_TRAP] = "trap",
-    [EXCP_FPE] = "floating point",
-    [EXCP_DDBS] = "debug data break store",
-    [EXCP_DWATCH] = "data watchpoint",
-    [EXCP_LTLBL] = "TLB modify",
-    [EXCP_TLBL] = "TLB load",
-    [EXCP_TLBS] = "TLB store",
-    [EXCP_DBE] = "data bus error",
-    [EXCP_DDBL] = "debug data break load",
-    [EXCP_THREAD] = "thread",
-    [EXCP_MDMX] = "MDMX",
-    [EXCP_C2E] = "precise coprocessor 2",
-    [EXCP_CACHE] = "cache error",
-    [EXCP_TLBXI] = "TLB execute-inhibit",
-    [EXCP_TLBRI] = "TLB read-inhibit",
-    [EXCP_MSADIS] = "MSA disabled",
-    [EXCP_MSAFPE] = "MSA floating point",
+const char regnames[32][4] = {
+    "r0", "at", "v0", "v1", "a0", "a1", "a2", "a3",
+    "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7",
+    "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
+    "t8", "t9", "k0", "k1", "gp", "sp", "s8", "ra",
 };
 
-const char *mips_exception_name(int32_t exception)
+static void fpu_dump_fpr(fpr_t *fpr, FILE *f, bool is_fpu64)
 {
-    if (exception < 0 || exception > EXCP_LAST) {
-        return "unknown";
+    if (is_fpu64) {
+        qemu_fprintf(f, "w:%08x d:%016" PRIx64 " fd:%13g fs:%13g psu: %13g\n",
+                     fpr->w[FP_ENDIAN_IDX], fpr->d,
+                     (double)fpr->fd,
+                     (double)fpr->fs[FP_ENDIAN_IDX],
+                     (double)fpr->fs[!FP_ENDIAN_IDX]);
+    } else {
+        fpr_t tmp;
+
+        tmp.w[FP_ENDIAN_IDX] = fpr->w[FP_ENDIAN_IDX];
+        tmp.w[!FP_ENDIAN_IDX] = (fpr + 1)->w[FP_ENDIAN_IDX];
+        qemu_fprintf(f, "w:%08x d:%016" PRIx64 " fd:%13g fs:%13g psu:%13g\n",
+                     tmp.w[FP_ENDIAN_IDX], tmp.d,
+                     (double)tmp.fd,
+                     (double)tmp.fs[FP_ENDIAN_IDX],
+                     (double)tmp.fs[!FP_ENDIAN_IDX]);
     }
-    return excp_names[exception];
+}
+
+static void fpu_dump_state(CPUMIPSState *env, FILE *f, int flags)
+{
+    int i;
+    bool is_fpu64 = !!(env->hflags & MIPS_HFLAG_F64);
+
+    qemu_fprintf(f,
+                 "CP1 FCR0 0x%08x  FCR31 0x%08x  SR.FR %d  fp_status 0x%02x\n",
+                 env->active_fpu.fcr0, env->active_fpu.fcr31, is_fpu64,
+                 get_float_exception_flags(&env->active_fpu.fp_status));
+    for (i = 0; i < 32; (is_fpu64) ? i++ : (i += 2)) {
+        qemu_fprintf(f, "%3s: ", fregnames[i]);
+        fpu_dump_fpr(&env->active_fpu.fpr[i], f, is_fpu64);
+    }
+}
+
+static void mips_cpu_dump_state(CPUState *cs, FILE *f, int flags)
+{
+    MIPSCPU *cpu = MIPS_CPU(cs);
+    CPUMIPSState *env = &cpu->env;
+    int i;
+
+    qemu_fprintf(f, "pc=0x" TARGET_FMT_lx " HI=0x" TARGET_FMT_lx
+                 " LO=0x" TARGET_FMT_lx " ds %04x "
+                 TARGET_FMT_lx " " TARGET_FMT_ld "\n",
+                 PC_ADDR(env), env->active_tc.HI[0], env->active_tc.LO[0],
+                 env->hflags, env->btarget, env->bcond);
+    for (i = 0; i < 32; i++) {
+        if ((i & 3) == 0) {
+            qemu_fprintf(f, "GPR%02d:", i);
+        }
+        qemu_fprintf(f, " %s " TARGET_FMT_lx,
+                     regnames[i], env->active_tc.gpr[i]);
+        if ((i & 3) == 3) {
+            qemu_fprintf(f, "\n");
+        }
+    }
+
+    qemu_fprintf(f, "CP0 Status  0x%08x Cause   0x%08x EPC    0x"
+                 TARGET_FMT_lx "\n",
+                 env->CP0_Status, env->CP0_Cause, get_CP0_EPC(env));
+    qemu_fprintf(f, "    Config0 0x%08x Config1 0x%08x LLAddr 0x%016"
+                 PRIx64 "\n",
+                 env->CP0_Config0, env->CP0_Config1, env->CP0_LLAddr);
+    qemu_fprintf(f, "    Config2 0x%08x Config3 0x%08x\n",
+                 env->CP0_Config2, env->CP0_Config3);
+    qemu_fprintf(f, "    Config4 0x%08x Config5 0x%08x\n",
+                 env->CP0_Config4, env->CP0_Config5);
+    if ((flags & CPU_DUMP_FPU) && (env->hflags & MIPS_HFLAG_FPU)) {
+        fpu_dump_state(env, f, flags);
+    }
 }
 
 void cpu_set_exception_base(int vp_index, target_ulong address)
@@ -196,197 +125,6 @@ void cpu_set_exception_base(int vp_index, target_ulong address)
     MIPSCPU *vp = MIPS_CPU(qemu_get_cpu(vp_index));
     vp->env.exception_base = address;
 }
-
-target_ulong exception_resume_pc(CPUMIPSState *env)
-{
-    target_ulong bad_pc;
-    target_ulong isa_mode;
-
-    isa_mode = !!(env->hflags & MIPS_HFLAG_M16);
-    bad_pc = PC_ADDR(env) | isa_mode;
-    if (env->hflags & MIPS_HFLAG_BMASK) {
-        /*
-         * If the exception was raised from a delay slot, come back to
-         * the jump.
-         */
-        bad_pc -= (env->hflags & MIPS_HFLAG_B16 ? 2 : 4);
-    }
-
-    return bad_pc;
-}
-
-bool mips_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
-{
-    if (interrupt_request & CPU_INTERRUPT_HARD) {
-        MIPSCPU *cpu = MIPS_CPU(cs);
-        CPUMIPSState *env = &cpu->env;
-
-        if (cpu_mips_hw_interrupts_enabled(env) &&
-            cpu_mips_hw_interrupts_pending(env)) {
-            /* Raise it */
-            cs->exception_index = EXCP_EXT_INTERRUPT;
-            env->error_code = 0;
-            mips_cpu_do_interrupt(cs);
-            return true;
-        }
-    }
-    return false;
-}
-
-void QEMU_NORETURN do_raise_exception_err(CPUMIPSState *env,
-                                          MipsExcp exception,
-                                          int error_code,
-                                          uintptr_t pc)
-{
-    CPUState *cs = env_cpu(env);
-
-#ifdef TARGET_CHERI
-    // Translate CP0 Unusable to CP2 ASR fault if we are in kernel mode and
-    // PCC is missing ASR:
-    if (exception == EXCP_CpU && error_code == 0 && in_kernel_mode(env)) {
-        if (!cheri_have_access_sysregs(env)) {
-            do_raise_c2_exception_noreg(env, CapEx_AccessSystemRegsViolation, pc);
-        }
-    }
-#endif
-    if (qemu_log_instr_or_mask_enabled(env, CPU_LOG_INT)) {
-        qemu_log_instr_or_mask_msg(env, CPU_LOG_INT, "%s: %d (%s) %d\n",
-                                   __func__, exception,
-                                   mips_exception_name(exception), error_code);
-    }
-    cs->exception_index = exception;
-    env->error_code = error_code;
-
-    cpu_loop_exit_restore(cs, pc);
-}
-
-#ifndef TARGET_MIPS64
-const char mips_gp_regnames[32][5] = {
-    {"zero"}, {"at"},   {"v0"},   {"v1"},   {"a0"},   {"a1"},   {"a2"},   {"a3"},
-    {"t0"},   {"t1"},   {"t2"},   {"t3"},   {"t4"},   {"t5"},   {"t6"},   {"t7"},
-    {"s0"},   {"s1"},   {"s2"},   {"s3"},   {"s4"},   {"s5"},   {"s6"},   {"s7"},
-    {"t8"},   {"t9"},   {"k0"},   {"k1"},   {"gp"},   {"sp"},   {"s8"},   {"ra"
-};
-#else
-// Use n64 register names
-const char mips_gp_regnames[32][5] = {
-    {"zero"}, {"at"},   {"v0"},   {"v1"},   {"a0"},   {"a1"},   {"a2"},   {"a3"},
-    {"a4"},   {"a5"},   {"a6"},   {"a7"},   {"t0"},   {"t1"},   {"t2"},   {"t3"},
-    {"s0"},   {"s1"},   {"s2"},   {"s3"},   {"s4"},   {"s5"},   {"s6"},   {"s7"},
-    {"t8"},   {"t9"},   {"k0"},   {"k1"},   {"gp"},   {"sp"},   {"s8"},   {"ra"},
-};
-#endif
-
-const char mips_regnames_HI[4][4] = {
-    {"HI0"}, {"HI1"}, {"HI2"}, {"HI3"},
-};
-
-const char mips_regnames_LO[4][4] = {
-    {"LO0"}, {"LO1"}, {"LO2"}, {"LO3"},
-};
-
-const char mips_fregnames[32][4] = {
-    {"f0"},  {"f1"},  {"f2"},  {"f3"},  {"f4"},  {"f5"},  {"f6"},  {"f7"},
-    {"f8"},  {"f9"},  {"f10"}, {"f11"}, {"f12"}, {"f13"}, {"f14"}, {"f15"},
-    {"f16"}, {"f17"}, {"f18"}, {"f19"}, {"f20"}, {"f21"}, {"f22"}, {"f23"},
-    {"f24"}, {"f25"}, {"f26"}, {"f27"}, {"f28"}, {"f29"}, {"f30"}, {"f31"},
-};
-
-const char mips_msaregnames[64][7] = {
-    {"w0.d0"},  {"w0.d1"},  {"w1.d0"},  {"w1.d1"},
-    {"w2.d0"},  {"w2.d1"},  {"w3.d0"},  {"w3.d1"},
-    {"w4.d0"},  {"w4.d1"},  {"w5.d0"},  {"w5.d1"},
-    {"w6.d0"},  {"w6.d1"},  {"w7.d0"},  {"w7.d1"},
-    {"w8.d0"},  {"w8.d1"},  {"w9.d0"},  {"w9.d1"},
-    {"w10.d0"}, {"w10.d1"}, {"w11.d0"}, {"w11.d1"},
-    {"w12.d0"}, {"w12.d1"}, {"w13.d0"}, {"w13.d1"},
-    {"w14.d0"}, {"w14.d1"}, {"w15.d0"}, {"w15.d1"},
-    {"w16.d0"}, {"w16.d1"}, {"w17.d0"}, {"w17.d1"},
-    {"w18.d0"}, {"w18.d1"}, {"w19.d0"}, {"w19.d1"},
-    {"w20.d0"}, {"w20.d1"}, {"w21.d0"}, {"w21.d1"},
-    {"w22.d0"}, {"w22.d1"}, {"w23.d0"}, {"w23.d1"},
-    {"w24.d0"}, {"w24.d1"}, {"w25.d0"}, {"w25.d1"},
-    {"w26.d0"}, {"w26.d1"}, {"w27.d0"}, {"w27.d1"},
-    {"w28.d0"}, {"w28.d1"}, {"w29.d0"}, {"w29.d1"},
-    {"w30.d0"}, {"w30.d1"}, {"w31.d0"}, {"w31.d1"},
-};
-
-#if !defined(TARGET_MIPS64)
-const char * const mips_mxuregnames[16][7] = {
-    {"XR1"},  {"XR2"},  {"XR3"},  {"XR4"},  {"XR5"},  {"XR6"},  {"XR7"},  {"XR8"},
-    {"XR9"},  {"XR10"}, {"XR11"}, {"XR12"}, {"XR13"}, {"XR14"}, {"XR15"}, {"MXU_CR"},
-};
-#endif
-
-/*
- * Names of coprocessor 0 registers.
- */
-const char mips_cop0_regnames[32*8][32] = {
-/*0*/   {"Index"},        {"MVPControl"},   {"MVPConf0"},     {"MVPConf1"},
-        {0},              {0},              {0},              {0},
-/*1*/   {"Random"},       {"VPEControl"},   {"VPEConf0"},     {"VPEConf1"},
-        {"YQMask"},       {"VPESchedule"},  {"VPEScheFBack"}, {"VPEOpt"},
-/*2*/   {"EntryLo0"},     {"TCStatus"},     {"TCBind"},       {"TCRestart"},
-        {"TCHalt"},       {"TCContext"},    {"TCSchedule"},   {"TCScheFBack"},
-/*3*/   {"EntryLo1"},     {0},              {0},              {0},
-        {0},              {0},              {0},              {"TCOpt"},
-/*4*/   {"Context"},      {"ContextConfig"}, {"UserLocal"},    {"XContextConfig"},
-        {0},              {0},              {0},              {0},
-/*5*/   {"PageMask"},     {"PageGrain"},    {"SegCtl0"},      {"SegCtl1"},
-        {"SegCtl2"},      {0},              {0},              {0},
-/*6*/   {"Wired"},        {"SRSConf0"},     {"SRSConf1"},     {"SRSConf2"},
-        {"SRSConf3"},     {"SRSConf4"},     {0},              {0},
-/*7*/   {"HWREna"},       {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*8*/   {"BadVAddr"},     {"BadInstr"},     {"BadInstrP"},    {0},
-        {0},              {0},              {0},              {0},
-/*9*/   {"Count"},        {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*10*/  {"EntryHi"},      {0},              {0},              {0},
-        {0},              {"MSAAccess"},    {"MSASave"},      {"MSARequest"},
-/*11*/  {"Compare"},      {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*12*/  {"Status"},       {"IntCtl"},       {"SRSCtl"},       {"SRSMap"},
-        {"ViewIPL"},      {"SRSMap2"},      {0},              {0},
-/*13*/  {"Cause"},        {0},              {0},              {0},
-        {"ViewRIPL"},     {"NestedExc"},    {0},              {0},
-/*14*/  {"EPC"},          {0},              {"NestedEPC"},    {0},
-        {0},              {0},              {0},              {0},
-/*15*/  {"PRId"},         {"EBase"},        {"CDMMBase"},     {"CMGCRBase"},
-        {0},              {0},              {0},              {0},
-/*16*/  {"Config"},       {"Config1"},      {"Config2"},      {"Config3"},
-        {"Config4"},      {"Config5"},      {"Config6"},      {"Config7"},
-/*17*/  {"LLAddr"},       {"internal_lladdr (virtual)"}, {"internal_llval"}, {0},
-        {0},              {0},              {0},              {0},
-/*18*/  {"WatchLo"},      {"WatchLo1"},     {"WatchLo2"},     {"WatchLo3"},
-        {"WatchLo4"},     {"WatchLo5"},     {"WatchLo6"},     {"WatchLo7"},
-/*19*/  {"WatchHi"},      {"WatchHi1"},     {"WatchHi2"},     {"WatchHi3"},
-        {"WatchHi4"},     {"WatchHi5"},     {"WatchHi6"},     {"WatchHi7"},
-/*20*/  {"XContext"},     {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*21*/  {0},              {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*22*/  {0},              {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*23*/  {"Debug"},        {"TraceControl"}, {"TraceControl2"}, {"UserTraceData"},
-        {"TraceIBPC"},    {"TraceDBPC"},    {"Debug2"},       {0},
-/*24*/  {"DEPC"},         {0},              {"TraceControl3"}, {"UserTraceData2"},
-        {0},              {0},              {0},              {0},
-/*25*/  {"PerfCnt"},      {"PerfCnt1"},     {"PerfCnt2"},     {"PerfCnt3"},
-        {"PerfCnt4"},     {"PerfCnt5"},     {"PerfCnt6"},     {"PerfCnt7"},
-/*26*/  {"ErrCtl"},       {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*27*/  {"CacheErr"},     {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*28*/  {"ITagLo"},       {"IDataLo"},      {"DTagLo"},       {"DDataLo"},
-        {"L23TagLo"},     {"L23DataLo"},    {0},              {0},
-/*29*/  {"ITagHi"},       {"IDataHi"},      {"DTagHi"},       {0},
-        {0},              {"L23DataHi"},    {0},              {0},
-/*30*/  {"ErrorEPC"},     {0},              {0},              {0},
-        {0},              {0},              {0},              {0},
-/*31*/  {"DESAVE"},       {0},              {"KScratch1"},    {"KScratch2"},
-        {"KScratch3"},    {"KScratch4"},    {"KScratch5"},    {"KScratch6"},
-};
 
 #ifdef TARGET_CHERI
 const char cheri_gp_regnames[32][4] = {
@@ -417,56 +155,9 @@ const char * const mips_cpu_mode_names[QEMU_LOG_INSTR_CPU_MODE_MAX] = {
 static void mips_cpu_set_pc(CPUState *cs, vaddr value)
 {
     MIPSCPU *cpu = MIPS_CPU(cs);
-    CPUMIPSState *env = &cpu->env;
 
-    mips_update_pc(env, value & ~(target_ulong)1, /*can_be_unrepresentable=*/false);
-    if (value & 1) {
-        env->hflags |= MIPS_HFLAG_M16;
-    } else {
-        env->hflags &= ~(MIPS_HFLAG_M16);
-    }
+    mips_env_set_pc(&cpu->env, value);
 }
-
-#ifdef CONFIG_TCG
-static void mips_cpu_synchronize_from_tb(CPUState *cs,
-                                         const TranslationBlock *tb)
-{
-    MIPSCPU *cpu = MIPS_CPU(cs);
-    CPUMIPSState *env = &cpu->env;
-
-    mips_update_pc(env, tb->pc, /*can_be_unrepresentable=*/false);
-    env->hflags &= ~MIPS_HFLAG_BMASK;
-    env->hflags |= tb->flags & MIPS_HFLAG_BMASK;
-
-    /*
-     * Break any load-link that's in flight on this CPU since we've been
-     * preempted.  This is sufficiently rare that it shouldn't hurt to do it
-     * every preemption.  Of course, it's also only really safe to use ->lladdr
-     * for capability work at all because we're forcing MTTCG off for CHERI due
-     * to its tag table implementation.  But this doesn't make it any worse!
-     *
-     * See also target/mips/op_helper:/helper_eret
-     */
-    env->lladdr = 1;
-}
-
-# ifndef CONFIG_USER_ONLY
-static bool mips_io_recompile_replay_branch(CPUState *cs,
-                                            const TranslationBlock *tb)
-{
-    MIPSCPU *cpu = MIPS_CPU(cs);
-    CPUMIPSState *env = &cpu->env;
-
-    if ((env->hflags & MIPS_HFLAG_BMASK) != 0 && PC_ADDR(env) != tb->pc) {
-        mips_update_pc(env, PC_ADDR(env) - (env->hflags & MIPS_HFLAG_B16 ? 2 : 4),
-                       /*can_be_unrepresentable=*/false);
-        env->hflags &= ~MIPS_HFLAG_BMASK;
-        return true;
-    }
-    return false;
-}
-# endif /* !CONFIG_USER_ONLY */
-#endif /* CONFIG_TCG */
 
 static bool mips_cpu_has_work(CPUState *cs)
 {
@@ -893,7 +584,7 @@ static void mips_cpu_realizefn(DeviceState *dev, Error **errp)
 
     env->exception_base = (int32_t)0xBFC00000;
 
-#ifndef CONFIG_USER_ONLY
+#if defined(CONFIG_TCG) && !defined(CONFIG_USER_ONLY)
     mmu_init(env, env->cpu_model);
 #endif
     fpu_init(env, env->cpu_model);

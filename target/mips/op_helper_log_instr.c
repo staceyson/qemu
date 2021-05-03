@@ -53,7 +53,7 @@ void helper_mips_log_instr_gpr(CPUArchState *env, uint32_t reg,
                                target_ulong value)
 {
     if (qemu_log_instr_enabled(env))
-        qemu_log_instr_reg(env, mips_gp_regnames[reg], value);
+        qemu_log_instr_reg(env, regnames[reg], value);
 }
 
 /*
@@ -79,9 +79,9 @@ void helper_mips_log_instr_hilo(CPUArchState *env, uint32_t sel, uint32_t index,
         return;
 
     if (sel) {
-        qemu_log_instr_reg(env, mips_regnames_LO[index], value);
+        qemu_log_instr_reg(env, regnames_LO[index], value);
     } else {
-        qemu_log_instr_reg(env, mips_regnames_HI[index], value);
+        qemu_log_instr_reg(env, regnames_HI[index], value);
     }
 }
 
@@ -185,6 +185,8 @@ void helper_cheri_debug_message(struct CPUMIPSState* env, uint64_t pc)
         assert(false && "logic error");
     }
 }
+
+
 
 #ifndef CONFIG_USER_ONLY
 
@@ -324,4 +326,54 @@ void helper_mtc0_dumpstate(CPUMIPSState *env, target_ulong arg1)
 #endif
     if (logfile != stderr)
         qemu_log_unlock(logfile);
+}
+
+void do_hexdump(GString *strbuf, uint8_t* buffer, target_ulong length,
+                target_ulong vaddr)
+{
+    char ascii_chars[17] = { 0 };
+    target_ulong line_start = vaddr & ~0xf;
+    target_ulong addr;
+
+    /* print leading empty space to always start with an aligned address */
+    if (line_start != vaddr) {
+        g_string_append_printf(strbuf, "    " TARGET_FMT_lx" : ", line_start);
+        for (addr = line_start; addr < vaddr; addr++) {
+            if ((addr % 4) == 0) {
+                g_string_append_printf(strbuf, "   ");
+            } else {
+                g_string_append_printf(strbuf, "  ");
+            }
+            ascii_chars[addr % 16] = ' ';
+        }
+    }
+    ascii_chars[16] = '\0';
+    for (addr = vaddr; addr < vaddr + length; addr++) {
+        if ((addr % 16) == 0) {
+            g_string_append_printf(strbuf, "    " TARGET_FMT_lx ": ",
+                                   line_start);
+        }
+        if ((addr % 4) == 0) {
+            g_string_append_printf(strbuf, " ");
+        }
+        unsigned char c = (unsigned char)buffer[addr - vaddr];
+        g_string_append_printf(strbuf, "%02x", c);
+        ascii_chars[addr % 16] = isprint(c) ? c : '.';
+        if ((addr % 16) == 15) {
+            g_string_append_printf(strbuf, "  %s\r\n", ascii_chars);
+            line_start += 16;
+        }
+    }
+    if (line_start != vaddr + length) {
+        const target_ulong hexdump_end_addr = (vaddr + length) | 0xf;
+        for (addr = vaddr + length; addr <= hexdump_end_addr; addr++) {
+            if ((addr % 4) == 0) {
+                g_string_append_printf(strbuf, "   ");
+            } else {
+                g_string_append_printf(strbuf, "  ");
+            }
+            ascii_chars[addr % 16] = ' ';
+        }
+        g_string_append_printf(strbuf, "  %s\r\n", ascii_chars);
+    }
 }

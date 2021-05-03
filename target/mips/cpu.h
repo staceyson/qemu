@@ -152,6 +152,9 @@ struct cheri_cap_hwregs {
     cap_register_t EPCC; /* CapHwr 31 */
 };
 
+/* Needed for cheri-common logging */
+extern const char cheri_gp_regnames[32][4];
+
 #endif /* TARGET_CHERI */
 
 
@@ -1324,20 +1327,6 @@ struct MIPSCPU {
      */
     unsigned cp0_count_rate;
 };
-
-/* Register names for logging output */
-extern const char mips_gp_regnames[32][5];
-extern const char mips_regnames_HI[4][4];
-extern const char mips_regnames_LO[4][4];
-extern const char mips_fregnames[32][4];
-extern const char mips_msaregnames[64][7];
-extern const char mips_mxuregnames[16][7];
-extern const char mips_cop0_regnames[32*8][32];
-#ifdef TARGET_CHERI
-/* Needed for cheri-common logging */
-extern const char cheri_gp_regnames[32][4];
-extern const char mips_cheri_hw_regnames[32][10];
-#endif
 
 void mips_cpu_list(void);
 

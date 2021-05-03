@@ -604,7 +604,7 @@ target_ulong CHERI_HELPER_IMPL(cloadlinked(CPUArchState *env, uint32_t cb, uint3
         // TODO: should #if (CHERI_UNALIGNED) also disable this check?
         do_raise_c0_exception(env, EXCP_AdEL, addr);
     } else {
-        env->CP0_LLAddr = do_translate_address(env, addr, 0, _host_return_address);
+        env->CP0_LLAddr = cpu_mips_translate_address(env, addr, 0, _host_return_address);
         env->lladdr = addr;
         return addr;
     }
