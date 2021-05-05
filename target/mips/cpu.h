@@ -6,7 +6,6 @@
 #include "fpu/softfloat-types.h"
 #include "hw/clock.h"
 #include "mips-defs.h"
-#include "exec/log.h"
 
 #ifdef TARGET_CHERI
 #include "cheri_defs.h"
