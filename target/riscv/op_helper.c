@@ -69,10 +69,11 @@ target_ulong helper_csrrw(CPURISCVState *env, target_ulong src,
         target_ulong csr)
 {
     target_ulong val = 0;
-    int ret = riscv_csrrw(env, csr, &val, src, -1, GETPC());
 
-    if (ret < 0) {
-        riscv_raise_exception(env, -ret, GETPC());
+    RISCVException ret = riscv_csrrw(env, csr, &val, src, -1, GETPC());
+
+    if (ret != RISCV_EXCP_NONE) {
+        riscv_raise_exception(env, ret, GETPC());
     }
     return val;
 }
@@ -81,10 +82,12 @@ target_ulong helper_csrrs(CPURISCVState *env, target_ulong src,
         target_ulong csr, target_ulong rs1_pass)
 {
     target_ulong val = 0;
-    int ret = riscv_csrrw(env, csr, &val, -1, rs1_pass ? src : 0, GETPC());
 
-    if (ret < 0) {
-        riscv_raise_exception(env, -ret, GETPC());
+    RISCVException ret = riscv_csrrw(env, csr, &val, -1, rs1_pass ? src : 0,
+                                     GETPC());
+
+    if (ret != RISCV_EXCP_NONE) {
+        riscv_raise_exception(env, ret, GETPC());
     }
     return val;
 }
@@ -93,10 +96,12 @@ target_ulong helper_csrrc(CPURISCVState *env, target_ulong src,
         target_ulong csr, target_ulong rs1_pass)
 {
     target_ulong val = 0;
-    int ret = riscv_csrrw(env, csr, &val, 0, rs1_pass ? src : 0, GETPC());
 
-    if (ret < 0) {
-        riscv_raise_exception(env, -ret, GETPC());
+    RISCVException ret = riscv_csrrw(env, csr, &val, 0, rs1_pass ? src : 0,
+                                     GETPC());
+
+    if (ret != RISCV_EXCP_NONE) {
+        riscv_raise_exception(env, ret, GETPC());
     }
     return val;
 }

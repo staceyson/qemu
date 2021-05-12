@@ -44,10 +44,3 @@ st_c_cap    1111100  ..... ..... 000 01011 1011011 @r_2source  # This is st_d_ca
 sc_c_ddc    1111100  ..... ..... 000 10011 1011011 @atom_st_cap_or_ddc  # This is sc_d_ddc for RV64
 sc_c_cap    1111100  ..... ..... 000 11011 1011011 @atom_st_cap_or_ddc  # This is sc_d_cap for RV64
 
-# We reuse the ld/sd opcodes for lc/sc for RV32
-lc       ............   ..... 011 ..... 0000011 @i # def LC_64  : RVInstI<0x3, OPC_LOAD (0b0000011)
-sc       ....... .....  ..... 011 ..... 0100011 @s # def SC_64  : RVInstS<0x3, OPC_STORE (0b0100011)
-
-lr_c        00010 . . 00000 ..... 011 ..... 0101111 @atom_ld
-sc_c        00011 . . ..... ..... 011 ..... 0101111 @atom_st
-amoswap_c   00001 . . ..... ..... 011 ..... 0101111 @atom_st

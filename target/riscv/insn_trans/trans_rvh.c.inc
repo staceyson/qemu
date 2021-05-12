@@ -125,22 +125,24 @@ static bool trans_hsv_w(DisasContext *ctx, arg_hsv_w *a)
     return gen_hsv(ctx, a->rs1, a->rs2, MO_TESL);
 }
 
-#ifdef TARGET_RISCV64
 static bool trans_hlv_wu(DisasContext *ctx, arg_hlv_wu *a)
 {
+    REQUIRE_64BIT(ctx);
     return gen_hlv(ctx, a->rs1, a->rd, MO_TEUL);
 }
 
 static bool trans_hlv_d(DisasContext *ctx, arg_hlv_d *a)
 {
+
+    REQUIRE_64BIT(ctx);
     return gen_hlv(ctx, a->rs1, a->rd, MO_TEQ);
 }
 
 static bool trans_hsv_d(DisasContext *ctx, arg_hsv_d *a)
 {
+    REQUIRE_64BIT(ctx);
     return gen_hsv(ctx, a->rs1, a->rs2, MO_TEQ);
 }
-#endif
 
 static bool trans_hlvx_hu(DisasContext *ctx, arg_hlvx_hu *a)
 {

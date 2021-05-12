@@ -102,7 +102,7 @@ static int riscv_cpu_local_irq_pending(CPURISCVState *env)
     if (irqs) {
         return ctz64(irqs); /* since non-zero */
     } else {
-        return EXCP_NONE; /* indicates no pending interrupt */
+        return RISCV_EXCP_NONE; /* indicates no pending interrupt */
     }
 }
 #endif
@@ -179,12 +179,12 @@ void riscv_cpu_swap_hypervisor_regs(CPURISCVState *env, bool hs_mode_trap)
             riscv_log_instr_csr_changed(env, CSR_SCAUSE);
         }
 
-        env->vstval = env->sbadaddr;
-        env->sbadaddr = env->stval_hs;
+        env->vstval = env->stval;
+        env->stval = env->stval_hs;
         riscv_log_instr_csr_changed(env, CSR_VSTVAL);
         if (!hs_mode_trap) {
-            /* sbaddaddr is modified again when trapping to HS-mode */
-            riscv_log_instr_csr_changed(env, CSR_SBADADDR);
+            /* stval is modified again when trapping to HS-mode */
+            riscv_log_instr_csr_changed(env, CSR_STVAL);
         }
 
         env->vsatp = env->satp;
@@ -217,9 +217,9 @@ void riscv_cpu_swap_hypervisor_regs(CPURISCVState *env, bool hs_mode_trap)
         env->scause = env->vscause;
         riscv_log_instr_csr_changed(env, CSR_SCAUSE);
 
-        env->stval_hs = env->sbadaddr;
-        env->sbadaddr = env->vstval;
-        riscv_log_instr_csr_changed(env, CSR_SBADADDR);
+        env->stval_hs = env->stval;
+        env->stval = env->vstval;
+        riscv_log_instr_csr_changed(env, CSR_STVAL);
 
         env->satp_hs = env->satp;
         env->satp = env->vsatp;
@@ -437,12 +437,14 @@ static int get_physical_address_pmp(CPURISCVState *env, int *prot,
  * @first_stage: Are we in first stage translation?
  *               Second stage is used for hypervisor guest translation
  * @two_stage: Are we going to perform two stage translation
+ * @is_debug: Is this access from a debugger or the monitor?
  */
 static int get_physical_address(CPURISCVState *env, hwaddr *physical,
                                 int *prot, target_ulong addr,
                                 target_ulong *fault_pte_addr,
                                 int access_type, int mmu_idx,
-                                bool first_stage, bool two_stage)
+                                bool first_stage, bool two_stage,
+                                bool is_debug)
 {
     /* NOTE: the env->pc value visible here will not be
      * correct, but the value visible to the exception handler
@@ -510,20 +512,35 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
 
     if (first_stage == true) {
         if (use_background) {
-            base = (hwaddr)get_field(env->vsatp, SATP_PPN) << PGSHIFT;
-            vm = get_field(env->vsatp, SATP_MODE);
+            if (riscv_cpu_is_32bit(env)) {
+                base = (hwaddr)get_field(env->vsatp, SATP32_PPN) << PGSHIFT;
+                vm = get_field(env->vsatp, SATP32_MODE);
+            } else {
+                base = (hwaddr)get_field(env->vsatp, SATP64_PPN) << PGSHIFT;
+                vm = get_field(env->vsatp, SATP64_MODE);
+            }
         } else {
-            base = (hwaddr)get_field(env->satp, SATP_PPN) << PGSHIFT;
-            vm = get_field(env->satp, SATP_MODE);
+            if (riscv_cpu_is_32bit(env)) {
+                base = (hwaddr)get_field(env->satp, SATP32_PPN) << PGSHIFT;
+                vm = get_field(env->satp, SATP32_MODE);
+            } else {
+                base = (hwaddr)get_field(env->satp, SATP64_PPN) << PGSHIFT;
+                vm = get_field(env->satp, SATP64_MODE);
+            }
         }
         widened = 0;
     } else {
-        base = (hwaddr)get_field(env->hgatp, HGATP_PPN) << PGSHIFT;
-        vm = get_field(env->hgatp, HGATP_MODE);
+        if (riscv_cpu_is_32bit(env)) {
+            base = (hwaddr)get_field(env->hgatp, SATP32_PPN) << PGSHIFT;
+            vm = get_field(env->hgatp, SATP32_MODE);
+        } else {
+            base = (hwaddr)get_field(env->hgatp, SATP64_PPN) << PGSHIFT;
+            vm = get_field(env->hgatp, SATP64_MODE);
+        }
         widened = 2;
     }
     /* status.SUM will be ignored if execute on background */
-    sum = get_field(env->mstatus, MSTATUS_SUM) || use_background;
+    sum = get_field(env->mstatus, MSTATUS_SUM) || use_background || is_debug;
     switch (vm) {
     case VM_1_10_SV32:
       levels = 2; ptidxbits = 10; ptesize = 4; break;
@@ -585,7 +602,8 @@ restart:
             /* Do the second stage translation on the base PTE address. */
             int vbase_ret = get_physical_address(env, &vbase, &vbase_prot,
                                                  base, NULL, MMU_DATA_LOAD,
-                                                 mmu_idx, false, true);
+                                                 mmu_idx, false, true,
+                                                 is_debug);
 
             if (vbase_ret != TRANSLATE_SUCCESS) {
                 if (fault_pte_addr) {
@@ -860,16 +878,23 @@ static void raise_mmu_exception(CPURISCVState *env, target_ulong address,
                                 bool first_stage, bool two_stage)
 {
     CPUState *cs = env_cpu(env);
-    int page_fault_exceptions;
-    if (first_stage) {
-        page_fault_exceptions =
-            get_field(env->satp, SATP_MODE) != VM_1_10_MBARE &&
-            !pmp_violation;
+    int page_fault_exceptions, vm;
+    uint64_t stap_mode;
+
+    if (riscv_cpu_is_32bit(env)) {
+        stap_mode = SATP32_MODE;
     } else {
-        page_fault_exceptions =
-            get_field(env->hgatp, HGATP_MODE) != VM_1_10_MBARE &&
-            !pmp_violation;
+        stap_mode = SATP64_MODE;
     }
+
+    if (first_stage) {
+        vm = get_field(env->satp, stap_mode);
+    } else {
+        vm = get_field(env->hgatp, stap_mode);
+    }
+
+    page_fault_exceptions = vm != VM_1_10_MBARE && !pmp_violation;
+
     switch (access_type) {
     case MMU_INST_FETCH:
         if (riscv_cpu_virt_enabled(env) && !first_stage) {
@@ -929,13 +954,13 @@ hwaddr riscv_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
     int mmu_idx = cpu_mmu_index(&cpu->env, false);
 
     if (get_physical_address(env, &phys_addr, &prot, addr, NULL, 0, mmu_idx,
-                             true, riscv_cpu_virt_enabled(env))) {
+                             true, riscv_cpu_virt_enabled(env), true)) {
         return -1;
     }
 
     if (riscv_cpu_virt_enabled(env)) {
         if (get_physical_address(env, &phys_addr, &prot, phys_addr, NULL,
-                                 0, mmu_idx, false, true)) {
+                                 0, mmu_idx, false, true, true)) {
             return -1;
         }
     }
@@ -1077,7 +1102,7 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
         /* Two stage lookup */
         ret = get_physical_address(env, &pa, &prot, address,
                                    &env->guest_phys_fault_addr, access_type,
-                                   mmu_idx, true, true);
+                                   mmu_idx, true, true, false);
 
         /*
          * A G-stage exception may be triggered during two state lookup.
@@ -1100,7 +1125,8 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
             im_address = pa;
 
             ret = get_physical_address(env, &pa, &prot2, im_address, NULL,
-                                       access_type, mmu_idx, false, true);
+                                       access_type, mmu_idx, false, true,
+                                       false);
 
             qemu_log_mask(CPU_LOG_MMU,
                     "%s 2nd-stage address=%" VADDR_PRIx " ret %d physical "
@@ -1161,7 +1187,7 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     } else {
         /* Single stage lookup */
         ret = get_physical_address(env, &pa, &prot, address, NULL,
-                                   access_type, mmu_idx, true, false);
+                                   access_type, mmu_idx, true, false, false);
         ret = rvfi_dii_check_addr(env, ret, &pa, address, size, &prot, access_type);
 
         qemu_log_mask(CPU_LOG_MMU,
@@ -1413,8 +1439,8 @@ void riscv_cpu_do_interrupt(CPUState *cs)
         COPY_SPECIAL_REG(env, sepc, sepcc, pc, pcc);
         LOG_SPECIAL_REG(env, CSR_SEPC, CheriSCR_SEPCC);
 
-        env->sbadaddr = tval;
-        riscv_log_instr_csr_changed(env, CSR_SBADADDR);
+        env->stval = tval;
+        riscv_log_instr_csr_changed(env, CSR_STVAL);
         env->htval = htval;
         riscv_log_instr_csr_changed(env, CSR_HTVAL);
 
@@ -1454,8 +1480,8 @@ void riscv_cpu_do_interrupt(CPUState *cs)
         COPY_SPECIAL_REG(env, mepc, mepcc, pc, pcc);
         LOG_SPECIAL_REG(env, CSR_MEPC, CheriSCR_MEPCC);
 
-        env->mbadaddr = tval;
-        riscv_log_instr_csr_changed(env, CSR_MBADADDR);
+        env->mtval = tval;
+        riscv_log_instr_csr_changed(env, CSR_MTVAL);
         env->mtval2 = mtval2;
         riscv_log_instr_csr_changed(env, CSR_MTVAL2);
 
@@ -1494,7 +1520,7 @@ void riscv_cpu_do_interrupt(CPUState *cs)
 
     env->two_stage_lookup = false;
 #endif
-    cs->exception_index = EXCP_NONE; /* mark handled to qemu */
+    cs->exception_index = RISCV_EXCP_NONE; /* mark handled to qemu */
 }
 
 #ifdef TARGET_CHERI
