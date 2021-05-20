@@ -1919,6 +1919,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu, target_ulong pc,
 
     tcg_ctx->cpu = env_cpu(env);
     gen_intermediate_code(cpu, tb, max_insns);
+    assert(tb->size != 0);
     tcg_ctx->cpu = NULL;
     max_insns = tb->icount;
 
