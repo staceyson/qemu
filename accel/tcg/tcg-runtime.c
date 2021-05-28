@@ -33,9 +33,8 @@
 #include "disas/disas.h"
 #include "exec/log.h"
 #include "tcg/tcg.h"
-#include "exec/tb-lookup.h"
 #include "exec/log_instr.h"
-
+#include "tb-lookup.h"
 
 /* 32-bit helpers */
 
