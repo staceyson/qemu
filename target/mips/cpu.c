@@ -726,7 +726,6 @@ static void mips_cpu_class_init(ObjectClass *c, void *data)
     cc->tcg_ops = &mips_tcg_ops;
 #endif /* CONFIG_TCG */
 #if defined(TARGET_CHERI)
-    cc->dump_statistics = cheri_cpu_dump_statistics;
     start_ns = get_clock();
     atexit(dump_cpu_ips_on_exit);
 #if defined(DO_CHERI_STATISTICS)
