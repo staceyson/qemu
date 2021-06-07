@@ -46,7 +46,8 @@
  * - uint16_t cpu_get_asid(env, pc)
  *   return the hardware address space identifier for a particular address
  * - const char *cpu_get_mode_name(mode)
- *   return the mode name associated with a qemu_log_instr_cpu_mode_t for printing.
+ *   return the mode name associated with a qemu_log_instr_cpu_mode_t for
+ * printing.
  *
  * - Each target should implement their own register update logging helpers that
  *   call into qemu_log_instr_gpr(), qemu_log_instr_cap() and similar interface
@@ -74,10 +75,10 @@
 #define _glue_args(...) , ## __VA_ARGS__
 
 #ifdef CONFIG_TCG_LOG_INSTR
-#define qemu_ctx_logging_enabled(ctx) unlikely(ctx->base.log_instr_enabled)
+#define qemu_ctx_logging_enabled(ctx)   unlikely(ctx->base.log_instr_enabled)
 #define qemu_base_logging_enabled(base) unlikely(base->log_instr_enabled)
 #else
-#define qemu_ctx_logging_enabled(ctx) false
+#define qemu_ctx_logging_enabled(ctx)   false
 #define qemu_base_logging_enabled(base) false
 #endif
 
@@ -85,29 +86,32 @@
  * Helper to simplify checking for either instruction logging or
  * another loglevel enabled
  */
-#define qemu_log_instr_or_mask_enabled(env, mask)       \
-    ((unlikely(qemu_loglevel_mask(mask)) ||             \
-      qemu_log_instr_enabled(env)) ? true : false)
+#define qemu_log_instr_or_mask_enabled(env, mask)                              \
+    ((unlikely(qemu_loglevel_mask(mask)) || qemu_log_instr_enabled(env))       \
+         ? true                                                                \
+         : false)
 
 /*
  * Helper to simplify emitting a message either to instruction
  * logging extra text buffer or when another loglevel is enabled
  */
-#define qemu_log_instr_or_mask_msg(env, mask, msg, ...) do {            \
-        if (qemu_loglevel_mask(mask)) {                                 \
-            qemu_log(msg _glue_args(__VA_ARGS__));                      \
-        } else if (qemu_log_instr_enabled(env)) {                       \
-            qemu_log_instr_extra(env, msg _glue_args(__VA_ARGS__));     \
-        }                                                               \
+#define qemu_log_instr_or_mask_msg(env, mask, msg, ...)                        \
+    do {                                                                       \
+        if (qemu_loglevel_mask(mask)) {                                        \
+            qemu_log(msg _glue_args(__VA_ARGS__));                             \
+        } else if (qemu_log_instr_enabled(env)) {                              \
+            qemu_log_instr_extra(env, msg _glue_args(__VA_ARGS__));            \
+        }                                                                      \
     } while (0)
 
 /*
  * Helper version of qemu_log_instr_extra that checks whether logging is
  * enabled.
  */
-#define qemu_maybe_log_instr_extra(env, msg, ...) do {                  \
-        if (qemu_log_instr_enabled(env))                                \
-            qemu_log_instr_extra(env, msg _glue_args(__VA_ARGS__));     \
+#define qemu_maybe_log_instr_extra(env, msg, ...)                              \
+    do {                                                                       \
+        if (qemu_log_instr_enabled(env))                                       \
+            qemu_log_instr_extra(env, msg _glue_args(__VA_ARGS__));            \
     } while (0)
 
 /*
@@ -115,10 +119,11 @@
  * for the current instruction.
  * Note that this can be ignored by the output trace format.
  */
-#define qemu_log_instr_dbg_reg(env, name, value) do {                   \
-        if (qemu_log_instr_enabled(env))                                \
-            qemu_log_instr_extra(env, "    Write %s = " TARGET_FMT_lx "\n", \
-                                 name, value);                          \
+#define qemu_log_instr_dbg_reg(env, name, value)                               \
+    do {                                                                       \
+        if (qemu_log_instr_enabled(env))                                       \
+            qemu_log_instr_extra(env, "    Write %s = " TARGET_FMT_lx "\n",    \
+                                 name, value);                                 \
     } while (0)
 
 /*
@@ -126,13 +131,14 @@
  * info for the current instruction.
  * Note that this can be ignored by the output trace format.
  */
-#define qemu_log_instr_dbg_cap(env, name, value) do {                   \
-        if (qemu_log_instr_enabled(env))                                \
-            qemu_log_instr_extra(                                       \
-                env, "    Write %s|" PRINT_CAP_FMTSTR_L1 "\n"           \
-                "             |" PRINT_CAP_FMTSTR_L2 "\n",              \
-                name, PRINT_CAP_ARGS_L1(value),                         \
-                PRINT_CAP_ARGS_L2(value));                              \
+#define qemu_log_instr_dbg_cap(env, name, value)                               \
+    do {                                                                       \
+        if (qemu_log_instr_enabled(env))                                       \
+            qemu_log_instr_extra(env,                                          \
+                                 "    Write %s|" PRINT_CAP_FMTSTR_L1 "\n"      \
+                                 "             |" PRINT_CAP_FMTSTR_L2 "\n",    \
+                                 name, PRINT_CAP_ARGS_L1(value),               \
+                                 PRINT_CAP_ARGS_L2(value));                    \
     } while (0)
 
 #ifdef CONFIG_TCG_LOG_INSTR
@@ -188,7 +194,7 @@ void qemu_log_printf_create_globals(void);
 void qemu_log_instr_flush_tcg(bool request_stop);
 
 /* Helper macro to check for instruction logging enabled */
-#define	qemu_log_instr_enabled(env)                                     \
+#define qemu_log_instr_enabled(env)                                            \
     unlikely(qemu_log_instr_check_enabled((env)))
 
 /*
@@ -215,7 +221,8 @@ void qemu_log_instr_stop(CPUArchState *env, target_ulong pc);
  * depending whether the mode parameter is QEMU_LOG_INSTR_CPU_USER or not.
  */
 void qemu_log_instr_mode_switch(CPUArchState *env,
-    qemu_log_instr_cpu_mode_t mode, target_ulong pc);
+                                qemu_log_instr_cpu_mode_t mode,
+                                target_ulong pc);
 
 /*
  * Set the given CPU per-CPU log level.
@@ -309,7 +316,8 @@ void qemu_log_instr_exception(CPUArchState *env, uint32_t code,
 /*
  * Log interrupt event.
  */
-void qemu_log_instr_interrupt(CPUArchState *env, uint32_t code, target_ulong vector);
+void qemu_log_instr_interrupt(CPUArchState *env, uint32_t code,
+                              target_ulong vector);
 
 /*
  * Log magic NOP event, we record a function number and 4 arguments.
@@ -327,22 +335,22 @@ void qemu_log_instr_evt(CPUArchState *env, uint16_t fn, target_ulong arg0,
 void qemu_log_instr_extra(CPUArchState *env, const char *msg, ...);
 
 #else /* ! CONFIG_TCG_LOG_INSTR */
-#define	qemu_log_instr_enabled(cpu) false
-#define	qemu_log_instr_start(env, mode, pc)
-#define	qemu_log_instr_stop(env, mode, pc)
-#define	qemu_log_instr_mode_switch(...)
+#define qemu_log_instr_enabled(cpu) false
+#define qemu_log_instr_start(env, mode, pc)
+#define qemu_log_instr_stop(env, mode, pc)
+#define qemu_log_instr_mode_switch(...)
 #define qemu_log_instr_flush(env)
-#define	qemu_log_instr_reg(...)
-#define	qemu_log_instr_cap(...)
-#define	qemu_log_instr_mem(...)
-#define	qemu_log_instr_instr(...)
-#define	qemu_log_instr_hwtid(...)
-#define	qemu_log_instr_asid(...)
-#define	qemu_log_instr_exception(...)
-#define	qemu_log_instr_interrupt(...)
-#define	qemu_log_instr_env(...)
-#define	qemu_log_instr_extra(...)
-#define	qemu_log_instr_commit(...)
+#define qemu_log_instr_reg(...)
+#define qemu_log_instr_cap(...)
+#define qemu_log_instr_mem(...)
+#define qemu_log_instr_instr(...)
+#define qemu_log_instr_hwtid(...)
+#define qemu_log_instr_asid(...)
+#define qemu_log_instr_exception(...)
+#define qemu_log_instr_interrupt(...)
+#define qemu_log_instr_env(...)
+#define qemu_log_instr_extra(...)
+#define qemu_log_instr_commit(...)
 #define qemu_log_gen_printf(...)
 #define qemu_log_gen_printf_flush(base, flush_early, force_flush)
 #define qemu_log_printf_create_globals(...)

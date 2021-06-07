@@ -156,7 +156,7 @@ int qemu_log_instr_global_switch(int log_flags);
 
 /*
  * Update the ring buffer size.
- * Note that this does not guarantee that the existing buffered 
+ * Note that this does not guarantee that the existing buffered
  * entries will be retained.
  */
 void qemu_log_instr_set_buffer_size(unsigned long buffer_size);
