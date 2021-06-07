@@ -105,7 +105,10 @@ typedef struct CPURISCVState CPURISCVState;
 #ifdef TARGET_CHERI
 #include "cheri-lazy-capregs-types.h"
 #endif
+
+#if !defined(CONFIG_USER_ONLY)
 #include "pmp.h"
+#endif
 
 #define RV_VLEN_MAX 256
 
