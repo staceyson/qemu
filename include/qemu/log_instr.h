@@ -54,9 +54,9 @@ typedef enum {
     QLI_FMT_TEXT = 0,
     QLI_FMT_CVTRACE = 1,
     QLI_FMT_NOP = 2
-} qemu_log_instr_fmt_t;
+} qemu_log_instr_backend_t;
 
-extern qemu_log_instr_fmt_t qemu_log_instr_format;
+extern qemu_log_instr_backend_t qemu_log_instr_backend;
 
 /*
  * CPU mode. This unifies the logging codes for CPU mode switches.
@@ -88,14 +88,14 @@ typedef enum {
     QEMU_LOG_INSTR_LOGLEVEL_USER = 2,
 } qemu_log_instr_loglevel_t;
 
-static inline void qemu_log_instr_set_format(qemu_log_instr_fmt_t fmt)
+static inline void qemu_log_instr_set_backend(qemu_log_instr_backend_t id)
 {
-    qemu_log_instr_format = fmt;
+    qemu_log_instr_backend = id;
 }
 
-static inline qemu_log_instr_fmt_t qemu_log_instr_get_format(void)
+static inline qemu_log_instr_backend_t qemu_log_instr_get_backend()
 {
-    return qemu_log_instr_format;
+    return qemu_log_instr_backend;
 }
 
 struct cpu_log_instr_info;
@@ -162,5 +162,5 @@ int qemu_log_instr_global_switch(int log_flags);
 void qemu_log_instr_set_buffer_size(unsigned long buffer_size);
 
 #else /* ! CONFIG_TCG_LOG_INSTR */
-#define qemu_log_instr_set_format(fmt) ((void)0)
+#define qemu_log_instr_set_backend(id) ((void)0)
 #endif /* ! CONFIG_TCG_LOG_INSTR */

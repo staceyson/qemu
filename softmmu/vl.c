@@ -3455,9 +3455,9 @@ void qemu_init(int argc, char **argv, char **envp)
 #if defined(CONFIG_TCG_LOG_INSTR)
             case QEMU_OPTION_cheri_trace_format:
                 if (strcmp(optarg, "text") == 0) {
-                    qemu_log_instr_set_format(QLI_FMT_TEXT);
+                    qemu_log_instr_set_backend(QLI_FMT_TEXT);
                 } else if (strcmp(optarg, "cvtrace") == 0) {
-                    qemu_log_instr_set_format(QLI_FMT_CVTRACE);
+                    qemu_log_instr_set_backend(QLI_FMT_CVTRACE);
                 } else {
                     printf("Invalid choice for cheri-trace-format: '%s'\n", optarg);
                     exit(1);

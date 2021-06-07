@@ -179,26 +179,26 @@ typedef struct {
 } log_meminfo_t;
 
 /*
- * Callbacks defined by a trace format implementation.
+ * Callbacks defined by a trace backend implementation.
  * These are called to covert instruction tracing events to the corresponding
  * binary or text format.
  */
-struct trace_fmt_hooks {
+struct trace_backend_hooks {
     void (*emit_header)(CPUArchState *env);
     void (*emit_start)(CPUArchState *env, target_ulong pc);
     void (*emit_stop)(CPUArchState *env, target_ulong pc);
     void (*emit_entry)(CPUArchState *env, cpu_log_entry_t *entry);
 };
-typedef struct trace_fmt_hooks trace_fmt_hooks_t;
+typedef struct trace_backend_hooks trace_backend_hooks_t;
 
 /* Global trace format selector. Defaults to text tracing */
-qemu_log_instr_fmt_t qemu_log_instr_format = QLI_FMT_TEXT;
+qemu_log_instr_backend_t qemu_log_instr_backend = QLI_FMT_TEXT;
 
 /* Current format callbacks. */
-static trace_fmt_hooks_t *trace_format = NULL;
+static trace_backend_hooks_t *trace_backend;
 
-/* Existing format callbacks list, indexed by qemu_log_instr_fmt_t */
-static trace_fmt_hooks_t trace_formats[];
+/* Existing format callbacks list, indexed by qemu_log_instr_backend_t */
+static trace_backend_hooks_t trace_backends[];
 
 /*
  * CHERI binary trace format, originally used for MIPS only.
@@ -546,13 +546,13 @@ static void emit_cvtrace_stop(CPUArchState *env, target_ulong pc)
 static inline void emit_start_event(CPUArchState *env, target_ulong pc)
 {
     if ((get_cpu_log_state(env)->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) == 0)
-        trace_format->emit_start(env, pc);
+        trace_backend->emit_start(env, pc);
 }
 
 static inline void emit_stop_event(CPUArchState *env, target_ulong pc)
 {
     if ((get_cpu_log_state(env)->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) == 0)
-        trace_format->emit_stop(env, pc);
+        trace_backend->emit_stop(env, pc);
 }
 
 static inline void emit_entry_event(CPUArchState *env, cpu_log_entry_t *entry)
@@ -565,7 +565,7 @@ static inline void emit_entry_event(CPUArchState *env, cpu_log_entry_t *entry)
             cpulog->ring_tail =
                 (cpulog->ring_tail + 1) % cpulog->instr_info->len;
     } else {
-        trace_format->emit_entry(env, entry);
+        trace_backend->emit_entry(env, entry);
     }
 }
 
@@ -825,11 +825,12 @@ void qemu_log_instr_init(CPUState *cpu)
     reset_log_buffer(cpulog, entry);
 
     // Make sure we are using the correct trace format.
-    if (trace_format == NULL) {
-        trace_format = &trace_formats[qemu_log_instr_format];
+    if (trace_backend == NULL) {
+        trace_backend = &trace_backends[qemu_log_instr_format];
         // Only emit header on first init
-        if (trace_format->emit_header)
-            trace_format->emit_header(cpu->env_ptr);
+        if (trace_backend->emit_header) {
+            trace_backend->emit_header(cpu->env_ptr);
+        }
     }
 
     /* If we are starting with instruction logging enabled, switch it on now */
@@ -1492,7 +1493,7 @@ void qemu_log_instr_flush(CPUArchState *env)
 
     while (curr != cpulog->ring_head) {
         entry = &g_array_index(cpulog->instr_info, cpu_log_entry_t, curr);
-        trace_format->emit_entry(env, entry);
+        trace_backend->emit_entry(env, entry);
         curr = (curr + 1) % cpulog->instr_info->len;
     }
     cpulog->ring_tail = cpulog->ring_head;
@@ -1665,7 +1666,7 @@ static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry) {}
 /*
  * Hooks for each trace format
  */
-static trace_fmt_hooks_t trace_formats[] = {
+static trace_backend_hooks_t trace_backends[] = {
     { .emit_header = NULL,
       .emit_start = emit_text_start,
       .emit_stop = emit_text_stop,
