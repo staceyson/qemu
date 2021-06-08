@@ -69,6 +69,7 @@
 #define RVS RV('S')
 #define RVU RV('U')
 #define RVH RV('H')
+#define RVB RV('B')
 
 /* S extension denotes that Supervisor mode exists, however it is possible
    to have a core that support S mode but does not have an MMU and there
@@ -84,6 +85,7 @@ enum {
 #define PRIV_VERSION_1_10_0 0x00011000
 #define PRIV_VERSION_1_11_0 0x00011100
 
+#define BEXT_VERSION_0_93_0 0x00009300
 #define VEXT_VERSION_0_07_1 0x00000701
 
 enum {
@@ -155,6 +157,7 @@ struct CPURISCVState {
 
     target_ulong badaddr;
     target_ulong guest_phys_fault_addr;
+
 #ifdef TARGET_CHERI
     // The cause field reports the cause of the last capability exception,
     // following the encoding described in Table 3.9.2.
@@ -166,6 +169,10 @@ struct CPURISCVState {
     // register file described in Table 5.3, otherwise, they index the
     // general-purpose capability register file.
     uint8_t last_cap_index;  // Used to populate xtval
+#endif
+
+#ifdef CONFIG_USER_ONLY
+    uint32_t elf_flags;
 #endif
 
 #ifndef CONFIG_USER_ONLY
@@ -335,6 +342,7 @@ struct CPURISCVState {
 #endif
 
     target_ulong priv_ver;
+    target_ulong bext_ver;
     target_ulong vext_ver;
     // TODO: we should probably re-compute these instead of preserving
     //  in case misa becomes writable
@@ -422,6 +430,7 @@ struct RISCVCPU {
         bool ext_f;
         bool ext_d;
         bool ext_c;
+        bool ext_b;
         bool ext_s;
         bool ext_u;
         bool ext_h;
@@ -436,6 +445,7 @@ struct RISCVCPU {
 
         char *priv_spec;
         char *user_spec;
+        char *bext_spec;
         char *vext_spec;
         uint16_t vlen;
         uint16_t elen;
@@ -461,8 +471,6 @@ static inline bool riscv_feature(CPURISCVState *env, int feature)
 
 extern const char * const riscv_int_regnames[];
 extern const char * const riscv_fpr_regnames[];
-extern const char * const riscv_excp_names[];
-extern const char * const riscv_intr_names[];
 #ifdef TARGET_CHERI
 /* Needed for cheri-common logging */
 extern const char * const cheri_gp_regnames[];

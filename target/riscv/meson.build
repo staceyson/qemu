@@ -33,6 +33,7 @@ riscv_ss.add(files(
   'gdbstub.c',
   'op_helper.c',
   'vector_helper.c',
+  'bitmanip_helper.c',
   'translate.c',
 ))
 riscv_ss.add(when: 'TARGET_CHERI', if_true: files('op_helper_cheri.c'))
