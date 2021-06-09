@@ -1727,6 +1727,21 @@ ERST
         .flags      = "p",
     },
 
+SRST
+``calc_dirty_rate`` *second*
+  Start a round of dirty rate measurement with the period specified in *second*.
+  The result of the dirty rate measurement may be observed with ``info
+  dirty_rate`` command.
+ERST
+
+    {
+        .name       = "calc_dirty_rate",
+        .args_type  = "second:l,sample_pages_per_GB:l?",
+        .params     = "second [sample_pages_per_GB]",
+        .help       = "start a round of guest dirty rate measurement",
+        .cmd        = hmp_calc_dirty_rate,
+    },
+
     {
         .name       = "cheri_trace_buffer_size",
         .args_type  = "buffer_size:i",
