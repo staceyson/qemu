@@ -31,7 +31,7 @@
 #include "exec/helper-gen.h"
 #include "semihosting/semihost.h"
 
-#include "target/mips/trace.h"
+#include "trace.h"
 #include "trace-tcg.h"
 #include "exec/translator.h"
 #include "exec/log.h"
@@ -12894,8 +12894,8 @@ static void gen_branch(DisasContext *ctx, int insn_bytes)
             break;
 #endif /* TARGET_CHERI */
         default:
-            fprintf(stderr, "unknown branch 0x%x\n", proc_hflags);
-            abort();
+            LOG_DISAS("unknown branch 0x%x\n", proc_hflags);
+            gen_reserved_instruction(ctx);
         }
     }
 }
@@ -14846,8 +14846,6 @@ enum {
     BGEZALS = 0x13,
     BC2F = 0x14,
     BC2T = 0x15,
-    BPOSGE64 = 0x1a,
-    BPOSGE32 = 0x1b,
     /* These overlap and are distinguished by bit16 of the instruction */
     BC1F = 0x1c,
     BC1T = 0x1d,
@@ -16900,10 +16898,6 @@ static void decode_micromips32_opc(CPUMIPSState *env, DisasContext *ctx)
                 generate_exception_err(ctx, EXCP_CpU, 1);
             }
             break;
-        case BPOSGE64:
-        case BPOSGE32:
-            /* MIPS DSP: not implemented */
-            /* Fall through */
         default:
             MIPS_INVAL("pool32i");
             gen_reserved_instruction(ctx);
@@ -20971,6 +20965,8 @@ static void gen_pool32a5_nanomips_insn(DisasContext *ctx, int opc,
             tcg_gen_movi_tl(tv0, rd >> 3);
             tcg_gen_movi_tl(tv1, imm);
             gen_helper_shilo(tv0, tv1, cpu_env);
+            tcg_temp_free(tv1);
+            tcg_temp_free(tv0);
         }
         break;
     case NM_MULEQ_S_W_PHL:
@@ -21085,6 +21081,10 @@ static void gen_pool32a5_nanomips_insn(DisasContext *ctx, int opc,
         gen_reserved_instruction(ctx);
         break;
     }
+
+    tcg_temp_free(v2_t);
+    tcg_temp_free(v1_t);
+    tcg_temp_free(t0);
 }
 
 static int decode_nanomips_32_48_opc(CPUMIPSState *env, DisasContext *ctx)
@@ -21926,7 +21926,7 @@ static int decode_nanomips_32_48_opc(CPUMIPSState *env, DisasContext *ctx)
                                       extract32(ctx->opcode, 0, 1) << 13;
 
                         gen_compute_branch_nm(ctx, OPC_BPOSGE32, 4, -1, -2,
-                                              imm);
+                                              imm << 1);
                     }
                     break;
                 default:
@@ -22360,16 +22360,7 @@ static int decode_nanomips_opc(CPUMIPSState *env, DisasContext *ctx)
     return 2;
 }
 
-
 #endif // !TARGET_CHERI
-
-/* SmartMIPS extension to MIPS32 */
-
-#if defined(TARGET_MIPS64)
-
-/* MDMX extension to MIPS64 */
-
-#endif
 
 /* MIPSDSP functions. */
 static void gen_mipsdsp_ld(DisasContext *ctx, uint32_t opc,
@@ -25170,10 +25161,11 @@ static void decode_opc_special3_legacy(CPUMIPSState *env, DisasContext *ctx)
         {
             TCGv t0, t1;
 
+            check_dsp(ctx);
+
             if (rt == 0) {
                 break;
             }
-            check_dsp(ctx);
 
             t0 = tcg_temp_new();
             t1 = tcg_temp_new();
