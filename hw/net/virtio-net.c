@@ -3259,6 +3259,7 @@ static bool failover_replug_primary(VirtIONet *n, DeviceState *dev,
         }
         hotplug_handler_plug(hotplug_ctrl, dev, &err);
     }
+    pdev->partially_hotplugged = false;
 
 out:
     error_propagate(errp, err);
