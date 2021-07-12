@@ -32,7 +32,6 @@
 
 #include "instmap.h"
 
-
 /* global register indices */
 #ifdef TARGET_CHERI
 #include "cheri-lazy-capregs.h"
@@ -196,19 +195,6 @@ static void gen_exception_inst_addr_mis(DisasContext *ctx)
     generate_exception_mtval(ctx, RISCV_EXCP_INST_ADDR_MIS);
 }
 
-static inline bool use_goto_tb(DisasContext *ctx, target_ulong dest)
-{
-    if (unlikely(ctx->base.singlestep_enabled)) {
-        return false;
-    }
-
-#ifndef CONFIG_USER_ONLY
-    return (ctx->base.tb->pc & TARGET_PAGE_MASK) == (dest & TARGET_PAGE_MASK);
-#else
-    return true;
-#endif
-}
-
 /* Wrapper for getting reg values - need to check of reg is zero since
  * cpu_gpr[0] is not actually allocated
  */
@@ -238,6 +224,22 @@ static inline void _gen_get_gpr(TCGv t, int reg_num)
 #define gen_get_gpr(t, reg_num) _gen_get_gpr(t, reg_num)
 
 #include "cheri-translate-utils.h"
+
+static void gen_goto_tb(DisasContext *ctx, int n, target_ulong dest,
+                        bool bounds_check)
+{
+    if (bounds_check)
+        gen_check_branch_target(ctx, dest);
+
+    if (translator_use_goto_tb(&ctx->base, dest)) {
+        tcg_gen_goto_tb(n);
+        gen_update_cpu_pc(dest);
+        tcg_gen_exit_tb(ctx->base.tb, n);
+    } else {
+        gen_update_cpu_pc(dest);
+        lookup_and_goto_ptr(ctx);
+    }
+}
 
 /* Wrapper for setting reg values - need to check of reg is zero since
  * cpu_gpr[0] is not actually allocated. this is more for safety purposes,
@@ -330,27 +332,6 @@ void cheri_tcg_prepare_for_unconditional_exception(DisasContextBase *db)
 {
     cheri_tcg_save_pc(db);
     db->is_jmp = DISAS_NORETURN;
-}
-
-static void gen_goto_tb(DisasContext *ctx, int n, target_ulong dest,
-                        bool bounds_check)
-{
-    if (bounds_check)
-        gen_check_branch_target(ctx, dest);
-
-    if (use_goto_tb(ctx, dest)) {
-        /* chaining is only allowed when the jump is to the same page */
-        tcg_gen_goto_tb(n);
-        gen_update_cpu_pc(dest);
-
-        /* No need to check for single stepping here as use_goto_tb() will
-         * return false in case of single stepping.
-         */
-        tcg_gen_exit_tb(ctx->base.tb, n);
-    } else {
-        gen_update_cpu_pc(dest);
-        lookup_and_goto_ptr(ctx);
-    }
 }
 
 static void gen_mulhsu(TCGv ret, TCGv arg1, TCGv arg2)
