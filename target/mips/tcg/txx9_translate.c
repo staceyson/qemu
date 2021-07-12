@@ -11,7 +11,7 @@
 
 bool decode_ext_txx9(DisasContext *ctx, uint32_t insn)
 {
-#if defined(TARGET_MIPS64)
+#if defined(TARGET_MIPS64) && !defined(TARGET_CHERI)
     if (decode_ext_tx79(ctx, insn)) {
         return true;
     }

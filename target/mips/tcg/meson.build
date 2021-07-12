@@ -20,11 +20,12 @@ mips_ss.add(files(
   'translate_addr_const.c',
   'txx9_translate.c',
 ))
-mips_ss.add(when: 'TARGET_MIPS64', if_true: files(
-  'tx79_translate.c',
-), if_false: files(
-  'mxu_translate.c',
-))
+
+tx79_ss = ss.source_set()
+tx79_ss.add(when: 'TARGET_CHERI', if_false: files('tx79_translate.c'))
+
+mips_ss.add(when: 'TARGET_MIPS64', if_false: files('mxu_translate.c'))
+mips_ss.add_all(when: 'TARGET_MIPS64', if_true: [tx79_ss])
 
 if have_user
   subdir('user')
