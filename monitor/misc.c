@@ -1814,7 +1814,7 @@ void info_trace_events_completion(ReadLineState *rs, int nb_args, const char *st
         TraceEventIter iter;
         TraceEvent *ev;
         char *pattern = g_strdup_printf("%s*", str);
-        trace_event_iter_init(&iter, pattern);
+        trace_event_iter_init_pattern(&iter, pattern);
         while ((ev = trace_event_iter_next(&iter)) != NULL) {
             readline_add_completion(rs, trace_event_get_name(ev));
         }
@@ -1832,7 +1832,7 @@ void trace_event_completion(ReadLineState *rs, int nb_args, const char *str)
         TraceEventIter iter;
         TraceEvent *ev;
         char *pattern = g_strdup_printf("%s*", str);
-        trace_event_iter_init(&iter, pattern);
+        trace_event_iter_init_pattern(&iter, pattern);
         while ((ev = trace_event_iter_next(&iter)) != NULL) {
             readline_add_completion(rs, trace_event_get_name(ev));
         }
