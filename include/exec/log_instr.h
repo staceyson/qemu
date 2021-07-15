@@ -187,6 +187,51 @@ void qemu_log_gen_printf_flush(struct DisasContextBase *base, bool flush_early,
                                bool force_flush);
 void qemu_log_printf_create_globals(void);
 
+struct cpu_log_entry;
+
+/*
+ * Trace event identifiers.
+ */
+typedef enum {
+    LOG_EVENT_STATE = 0,
+    LOG_EVENT_CTX_SWITCH = 1,
+} log_event_id_t;
+
+/*
+ * Tracing status changed (e.g. trace start/stop)
+ */
+typedef enum {
+    LOG_EVENT_STATE_START,
+    LOG_EVENT_STATE_STOP
+} log_event_trace_state_t;
+
+typedef struct {
+    log_event_trace_state_t next_state;
+    target_ulong pc;
+} log_event_trace_state_update_t;
+
+/*
+ * Context switch event.
+ */
+typedef struct {
+    target_ulong pid; /* Process ID */
+    target_ulong tid; /* Thread ID */
+    target_ulong cid; /* Compartment ID */
+} log_event_ctx_switch_t;
+
+/*
+ * Trace event.
+ * This records arbitrary higher-level events associated with instruction
+ * entries.
+ */
+typedef struct {
+    log_event_id_t id;
+    union {
+        log_event_trace_state_update_t state;
+        log_event_ctx_switch_t ctx_switch;
+    };
+} log_event_t;
+
 /*
  * Request a flush of the TCG when changing loglevel outside of qemu_log_instr.
  * TODO(am2419): this should be removed from the interface.
@@ -230,9 +275,13 @@ void qemu_log_instr_mode_switch(CPUArchState *env,
 void qemu_log_instr_set_level(CPUArchState *env, qemu_log_instr_loglevel_t lvl);
 
 /*
- * Set the per-CPU log level for all the CPUs.
+ * Log a switch inc CPU modes.
+ * This will also trigger pause and resume of user-only logging activity,
+ * depending whether the mode parameter is QEMU_LOG_INSTR_CPU_USER or not.
  */
-void qemu_log_instr_allcpu_set_level(qemu_log_instr_loglevel_t lvl);
+void qemu_log_instr_mode_switch(CPUArchState *env,
+                                qemu_log_instr_cpu_mode_t mode,
+                                target_ulong pc);
 
 /*
  * Emit all buffered instruction logs.
@@ -324,9 +373,7 @@ void qemu_log_instr_interrupt(CPUArchState *env, uint32_t code,
  * Note that we have 6 bytes left in the cvtrace format, we may need
  * some trickery to reclaim those.
  */
-void qemu_log_instr_evt(CPUArchState *env, uint16_t fn, target_ulong arg0,
-                        target_ulong arg1, target_ulong arg2,
-                        target_ulong arg3);
+void qemu_log_instr_event(CPUArchState *env, log_event_t *evt);
 
 /*
  * Log extra information as a string. Some logging formats may
@@ -350,6 +397,7 @@ void qemu_log_instr_extra(CPUArchState *env, const char *msg, ...);
 #define qemu_log_instr_interrupt(...)
 #define qemu_log_instr_env(...)
 #define qemu_log_instr_extra(...)
+#define qemu_log_instr_event(...)
 #define qemu_log_instr_commit(...)
 #define qemu_log_gen_printf(...)
 #define qemu_log_gen_printf_flush(base, flush_early, force_flush)

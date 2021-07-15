@@ -105,12 +105,14 @@ typedef struct cpu_log_entry {
     uint16_t asid;
     int flags;
 /* Entry contains a synchronous exception */
-#define LI_FLAG_INTR_TRAP 1
+#define LI_FLAG_INTR_TRAP (1 << 0)
 /* Entry contains an asynchronous exception */
 #define LI_FLAG_INTR_ASYNC (1 << 1)
-#define LI_FLAG_INTR_MASK  0x3
+#define LI_FLAG_INTR_MASK  (LI_FLAG_INTR_TRAP | LI_FLAG_INTR_ASYNC)
 /* Entry contains a CPU mode-switch and associated code */
 #define LI_FLAG_MODE_SWITCH (1 << 2)
+/* Entry contains instruction data or just events */
+#define LI_FLAG_HAS_INSTR_DATA (1 << 3)
 
     qemu_log_instr_cpu_mode_t next_cpu_mode;
     uint32_t intr_code;
@@ -123,17 +125,23 @@ typedef struct cpu_log_entry {
     char insn_bytes[TARGET_MAX_INSN_SIZE];
 #define cpu_log_entry_endzero mem
     /*
+     * Array of log_meminfo_t.
      * For now we allow multiple accesses to be tied to one instruction.
      * Some architectures may have multiple memory accesses
      * in the same instruction (e.g. x86-64 pop r/m64,
      * vector/matrix instructions, load/store pair). It is unclear
      * whether we would treat these as multiple trace "entities".
-     *
-     * Array of log_meminfo_t
      */
     GArray *mem;
-    /* Register modifications. Array of log_reginfo_t */
+    /* Register modifications - array of log_reginfo_t */
     GArray *regs;
+    /*
+     * Events associated with the instruction - array of log_event_t.
+     * Note that events may be present even if the entry does not contain
+     * valid instruction state. This allows the flexibility of only
+     * instrumenting a subset of the instructions/events.
+     */
+    GArray *events;
     /* Extra text-only log */
     GString *txt_buffer;
 } cpu_log_entry_t;
@@ -185,9 +193,8 @@ typedef struct {
  */
 struct trace_backend_hooks {
     void (*emit_header)(CPUArchState *env);
-    void (*emit_start)(CPUArchState *env, target_ulong pc);
-    void (*emit_stop)(CPUArchState *env, target_ulong pc);
-    void (*emit_entry)(CPUArchState *env, cpu_log_entry_t *entry);
+    void (*emit_instr)(CPUArchState *env, cpu_log_entry_t *entry);
+    void (*emit_events)(CPUArchState *env, cpu_log_entry_t *entry);
 };
 typedef struct trace_backend_hooks trace_backend_hooks_t;
 
@@ -330,9 +337,10 @@ static inline void emit_text_reg(log_reginfo_t *rinfo)
 }
 
 /*
- * Emit textual trace entry to the log.
+ * Emit textual representation of the instruction in the given
+ * trace entry to the log.
  */
-static void emit_text_entry(CPUArchState *env, cpu_log_entry_t *entry)
+static void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
 {
     QemuLogFile *logfile;
     int i;
@@ -400,36 +408,36 @@ static void emit_text_entry(CPUArchState *env, cpu_log_entry_t *entry)
 }
 
 /*
- * Emit text tracing start event.
+ * Emit a textual representation of events recorded by the given trace entry.
  */
-static void emit_text_start(CPUArchState *env, target_ulong pc)
+static void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry)
 {
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
+    const log_event_t *event;
+    const char *log_state_op;
+    int i;
 
-    if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_USER) {
-        qemu_log("[%u:%u] Requested user-mode only instruction logging "
-                 "@ " TARGET_FMT_lx " \n",
-                 env_cpu(env)->cpu_index, cpu_get_asid(env, pc), pc);
-    } else {
-        qemu_log("[%u:%u] Requested instruction logging @ " TARGET_FMT_lx " \n",
-                 env_cpu(env)->cpu_index, cpu_get_asid(env, pc), pc);
-    }
-}
+    for (i = 0; i < entry->events->len; i++) {
+        event = &g_array_index(entry->events, const log_event_t, i);
+        if (event->id == LOG_EVENT_STATE) {
+            if (event->state.next_state == LOG_EVENT_STATE_START) {
+                log_state_op = "Requested";
+            } else if (event->state.next_state == LOG_EVENT_STATE_STOP) {
+                log_state_op = "Disabled";
+            }
 
-/*
- * Emit text tracing stop event.
- */
-static void emit_text_stop(CPUArchState *env, target_ulong pc)
-{
-    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
-
-    if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_USER) {
-        qemu_log("[%u:%u] Disabled user-mode only instruction logging "
-                 "@ " TARGET_FMT_lx " \n",
-                 env_cpu(env)->cpu_index, cpu_get_asid(env, pc), pc);
-    } else {
-        qemu_log("[%u:%u] Disabled instruction logging @ " TARGET_FMT_lx " \n",
-                 env_cpu(env)->cpu_index, cpu_get_asid(env, pc), pc);
+            if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_USER) {
+                qemu_log("[%u:%u] %s user-mode only instruction logging "
+                         "@ " TARGET_FMT_lx "\n",
+                         env_cpu(env)->cpu_index, cpu_get_asid(env),
+                         log_state_op, event->state.pc);
+            } else {
+                qemu_log("[%u:%u] %s instruction logging @ " TARGET_FMT_lx
+                         "\n",
+                         env_cpu(env)->cpu_index, cpu_get_asid(env),
+                         log_state_op, event->state.pc);
+            }
+        }
     }
 }
 
@@ -456,28 +464,28 @@ static void emit_cvtrace_header(CPUArchState *env)
 static void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry)
 {
     FILE *logfile;
-    cheri_trace_entry_t entry;
+    cheri_trace_entry_t ct_entry;
     /* TODO(am2419): this should be a per-cpu counter. */
     static uint16_t cycles;
     uint32_t *insn = (uint32_t *)&entry->insn_bytes[0];
 
-    entry.entry_type = CTE_NO_REG;
-    entry.thread = (uint8_t)env_cpu(env)->cpu_index;
-    entry.asid = (uint8_t)entry->asid;
-    entry.pc = cpu_to_be64(entry->pc);
-    entry.cycles = cpu_to_be16(cycles++);
+    ct_entry.entry_type = CTE_NO_REG;
+    ct_entry.thread = (uint8_t)env_cpu(env)->cpu_index;
+    ct_entry.asid = (uint8_t)entry->asid;
+    ct_entry.pc = cpu_to_be64(entry->pc);
+    ct_entry.cycles = cpu_to_be16(cycles++);
     /*
      * TODO(am2419): The instruction bytes are alread in target byte-order,
      * however cheritrace does not currently expect this.
      */
-    entry.inst = cpu_to_be32(*insn);
+    ct_entry.inst = cpu_to_be32(*insn);
     switch (entry->flags & LI_FLAG_INTR_MASK) {
     case LI_FLAG_INTR_TRAP:
-        entry.exception = (uint8_t)(entry->intr_code & 0xff);
+        ct_entry.exception = (uint8_t)(entry->intr_code & 0xff);
     case LI_FLAG_INTR_ASYNC:
-        entry.exception = 0;
+        ct_entry.exception = 0;
     default:
-        entry.exception = CTE_EXCEPTION_NONE;
+        ct_entry.exception = CTE_EXCEPTION_NONE;
     }
 
     if (entry->regs->len) {
@@ -499,16 +507,16 @@ static void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry)
                                  ((uint64_t)COMBINED_PERMS_VALUE(cr) << 1) |
                                  (uint64_t)(cap_is_unsealed(cr) ? 0 : 1));
 
-            entry.entry_type = CTE_CAP;
-            entry.val2 = cpu_to_be64(metadata);
-            entry.val3 = cpu_to_be64(cap_get_cursor(cr));
-            entry.val4 = cpu_to_be64(cap_get_base(cr));
-            entry.val5 = cpu_to_be64(cap_get_length_sat(cr));
+            ct_entry.entry_type = CTE_CAP;
+            ct_entry.val2 = cpu_to_be64(metadata);
+            ct_entry.val3 = cpu_to_be64(cap_get_cursor(cr));
+            ct_entry.val4 = cpu_to_be64(cap_get_base(cr));
+            ct_entry.val5 = cpu_to_be64(cap_get_length_sat(cr));
         } else
 #endif
         {
-            entry.entry_type = CTE_GPR;
-            entry.val2 = cpu_to_be64(rinfo->gpr);
+            ct_entry.entry_type = CTE_GPR;
+            ct_entry.val2 = cpu_to_be64(rinfo->gpr);
         }
     }
 
@@ -518,55 +526,43 @@ static void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry)
         log_assert((minfo->flags & LMI_CAP) == 0 && "Capability memory access "
                                                     "without CHERI support");
 #endif
-        entry.val1 = cpu_to_be64(minfo->addr);
+        ct_entry.val1 = cpu_to_be64(minfo->addr);
         // Hack to avoid checking for GPR or CAP
         if (minfo->flags & LMI_LD)
-            entry.entry_type += 1;
+            ct_entry.entry_type += 1;
         else if (minfo->flags & LMI_ST)
-            entry.entry_type += 2;
+            ct_entry.entry_type += 2;
     }
 
     logfile = qemu_log_lock();
-    fwrite(&entry, sizeof(entry), 1, logfile);
+    fwrite(&ct_entry, sizeof(ct_entry), 1, logfile);
     qemu_log_unlock(logfile);
-}
-
-static void emit_cvtrace_start(CPUArchState *env, target_ulong pc)
-{
-    // TODO(am2419) Emit an event for instruction logging start
-}
-
-static void emit_cvtrace_stop(CPUArchState *env, target_ulong pc)
-{
-    // TODO(am2419) Emit an event for instruction logging stop
 }
 
 /* Core instruction logging implementation */
 
-static inline void emit_start_event(CPUArchState *env, target_ulong pc)
+static inline void emit_start_event(cpu_log_entry_t *entry, target_ulong pc)
 {
-    if ((get_cpu_log_state(env)->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) == 0)
-        trace_backend->emit_start(env, pc);
+    log_event_t event;
+
+    event.id = LOG_EVENT_STATE;
+    event.state.next_state = LOG_EVENT_STATE_START;
+    event.state.pc = pc;
+    /* Start events always have incomplete instruction data */
+    entry->flags &= ~LI_FLAG_HAS_INSTR_DATA;
+
+    g_array_append_val(entry->events, event);
 }
 
-static inline void emit_stop_event(CPUArchState *env, target_ulong pc)
+static inline void emit_stop_event(cpu_log_entry_t *entry, target_ulong pc)
 {
-    if ((get_cpu_log_state(env)->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) == 0)
-        trace_backend->emit_stop(env, pc);
-}
+    log_event_t event;
 
-static inline void emit_entry_event(CPUArchState *env, cpu_log_entry_t *entry)
-{
-    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
+    event.id = LOG_EVENT_STATE;
+    event.state.next_state = LOG_EVENT_STATE_STOP;
+    event.state.pc = pc;
 
-    if (cpulog->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) {
-        cpulog->ring_head = (cpulog->ring_head + 1) % cpulog->instr_info->len;
-        if (cpulog->ring_tail == cpulog->ring_head)
-            cpulog->ring_tail =
-                (cpulog->ring_tail + 1) % cpulog->instr_info->len;
-    } else {
-        trace_backend->emit_entry(env, entry);
-    }
+    g_array_append_val(entry->events, event);
 }
 
 /* Reset instruction info buffer for next instruction */
@@ -578,6 +574,7 @@ static void reset_log_buffer(cpu_log_instr_state_t *cpulog,
             (char *)&entry->cpu_log_entry_startzero));
     g_array_remove_range(entry->regs, 0, entry->regs->len);
     g_array_remove_range(entry->mem, 0, entry->mem->len);
+    g_array_remove_range(entry->events, 0, entry->events->len);
     g_string_erase(entry->txt_buffer, 0, -1);
     cpulog->force_drop = false;
     cpulog->starting = false;
@@ -597,8 +594,7 @@ static void do_instr_commit(CPUArchState *env)
 
     if (cpulog->starting) {
         cpulog->starting = false;
-        emit_start_event(env, cpu_get_recent_pc(env));
-        return;
+        emit_start_event(entry, cpu_get_recent_pc(env));
     }
 
     /* Check for dfilter matches in this instruction */
@@ -622,8 +618,7 @@ static void do_instr_commit(CPUArchState *env)
         if (match)
             emit_entry_event(env, entry);
     } else {
-        /* dfilter disabled, always log */
-        emit_entry_event(env, entry);
+        trace_backend->emit_instr(env, entry);
     }
 }
 
@@ -690,8 +685,8 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
             reset_log_buffer(cpulog, entry);
             return;
         }
+        emit_stop_event(entry, cpu_get_recent_pc(env));
         do_instr_commit(env);
-        emit_stop_event(env, cpu_get_recent_pc(env));
         /* Instruction commit may have advanced to the next entry buffer slot */
         entry = get_cpu_log_entry(env);
         reset_log_buffer(cpulog, entry);
@@ -780,6 +775,9 @@ static void qemu_log_entry_init(cpu_log_entry_t *entry)
     if (entry->mem == NULL) {
         entry->mem = g_array_new(false, true, sizeof(log_meminfo_t));
     }
+    if (entry->events == NULL) {
+        entry->events = g_array_new(false, true, sizeof(log_event_t));
+    }
 }
 
 /*
@@ -789,9 +787,10 @@ static void qemu_log_entry_destroy(gpointer data)
 {
     cpu_log_entry_t *entry = data;
 
-    g_string_free(entry->txt_buffer, TRUE);
-    g_array_free(entry->regs, TRUE);
-    g_array_free(entry->mem, TRUE);
+    g_string_free(entry->txt_buffer, true);
+    g_array_free(entry->regs, true);
+    g_array_free(entry->mem, true);
+    g_array_free(entry->events, true);
 }
 
 /*
@@ -826,7 +825,7 @@ void qemu_log_instr_init(CPUState *cpu)
 
     // Make sure we are using the correct trace format.
     if (trace_backend == NULL) {
-        trace_backend = &trace_backends[qemu_log_instr_format];
+        trace_backend = &trace_backends[qemu_log_instr_backend];
         // Only emit header on first init
         if (trace_backend->emit_header) {
             trace_backend->emit_header(cpu->env_ptr);
@@ -1066,6 +1065,7 @@ void qemu_log_instr(CPUArchState *env, target_ulong pc, const char *insn,
 
     entry->pc = pc;
     entry->insn_size = size;
+    entry->flags |= LI_FLAG_HAS_INSTR_DATA;
     memcpy(entry->insn_bytes, insn, size);
 }
 
@@ -1097,15 +1097,11 @@ void qemu_log_instr_interrupt(CPUArchState *env, uint32_t code,
     entry->intr_vector = vector;
 }
 
-void qemu_log_instr_evt(CPUArchState *env, uint16_t fn, target_ulong arg0,
-                        target_ulong arg1, target_ulong arg2, target_ulong arg3)
+void qemu_log_instr_event(CPUArchState *env, log_event_t *evt)
 {
-    /* entry->cv_buffer.entry_type = CVT_EVT; */
-    /* entry->cv_buffer.val5 = fn; */
-    /* entry->cv_buffer.val1 = arg0; */
-    /* entry->cv_buffer.val2 = arg1; */
-    /* entry->cv_buffer.val3 = arg2; */
-    /* entry->cv_buffer.val4 = arg3; */
+    cpu_log_entry_t *entry = get_cpu_log_entry(env);
+
+    g_array_append_val(entry->events, *evt);
 }
 
 void qemu_log_instr_extra(CPUArchState *env, const char *msg, ...)
@@ -1488,12 +1484,20 @@ void qemu_log_instr_flush(CPUArchState *env)
     size_t curr = cpulog->ring_tail;
     cpu_log_entry_t *entry;
 
-    if ((cpulog->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) == 0)
+    /*
+     * If tracing is disabled, force the commit of events in this
+     * trace entry.
+     */
+    if (!qemu_log_instr_check_enabled(env)) {
+        qemu_log_instr_commit(env);
+    }
+    if ((cpulog->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) == 0) {
         return;
+    }
 
     while (curr != cpulog->ring_head) {
         entry = &g_array_index(cpulog->instr_info, cpu_log_entry_t, curr);
-        trace_backend->emit_entry(env, entry);
+        trace_backend->emit_instr(env, entry);
         curr = (curr + 1) % cpulog->instr_info->len;
     }
     cpulog->ring_tail = cpulog->ring_head;
@@ -1659,8 +1663,6 @@ void helper_log_value(CPUArchState *env, const void *ptr, uint64_t value)
     qemu_maybe_log_instr_extra(env, "%s: " TARGET_FMT_plx "\n", ptr, value);
 }
 
-static void emit_nop_start(CPUArchState *env, target_ulong pc) {}
-static void emit_nop_stop(CPUArchState *env, target_ulong pc) {}
 static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry) {}
 
 /*
@@ -1668,17 +1670,14 @@ static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry) {}
  */
 static trace_backend_hooks_t trace_backends[] = {
     { .emit_header = NULL,
-      .emit_start = emit_text_start,
-      .emit_stop = emit_text_stop,
-      .emit_entry = emit_text_entry },
+      .emit_instr = emit_text_instr,
+      .emit_events = emit_text_events },
     { .emit_header = emit_cvtrace_header,
-      .emit_start = emit_cvtrace_start,
-      .emit_stop = emit_cvtrace_stop,
-      .emit_entry = emit_cvtrace_entry },
+      .emit_instr = emit_cvtrace_entry,
+      .emit_events = NULL },
     { .emit_header = NULL,
-      .emit_start = emit_nop_start,
-      .emit_stop = emit_nop_stop,
-      .emit_entry = emit_nop_entry }
+      .emit_instr = emit_nop_entry,
+      .emit_events = emit_nop_entry }
 };
 
 #endif /* CONFIG_TCG_LOG_INSTR */

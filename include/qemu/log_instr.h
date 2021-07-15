@@ -53,7 +53,7 @@
 typedef enum {
     QLI_FMT_TEXT = 0,
     QLI_FMT_CVTRACE = 1,
-    QLI_FMT_NOP = 2
+    QLI_FMT_NOP = 2,
 } qemu_log_instr_backend_t;
 
 extern qemu_log_instr_backend_t qemu_log_instr_backend;
