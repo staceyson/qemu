@@ -207,6 +207,15 @@ static trace_backend_hooks_t *trace_backend;
 /* Existing format callbacks list, indexed by qemu_log_instr_backend_t */
 static trace_backend_hooks_t trace_backends[];
 
+/* Existing trace filters list, indexed by cpu_log_instr_filter_t */
+static cpu_log_instr_filter_fn_t trace_filters[];
+
+/*
+ * Instruction entry filter function.
+ * Return false if the entry should be dropped, true otherwise.
+ */
+typedef bool (*cpu_log_instr_filter_fn_t)(struct cpu_log_entry *entry);
+
 /*
  * CHERI binary trace format, originally used for MIPS only.
  * The format is limited to one entry per instruction, each
@@ -585,6 +594,8 @@ static void do_instr_commit(CPUArchState *env)
 {
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
     cpu_log_entry_t *entry = get_cpu_log_entry(env);
+    cpu_log_instr_filter_fn_t filter;
+    int i;
 
     log_assert(cpulog != NULL && "Invalid log state");
     log_assert(entry != NULL && "Invalid log buffer");
@@ -592,31 +603,23 @@ static void do_instr_commit(CPUArchState *env)
     if (cpulog->force_drop)
         return;
 
+    for (i = 0; i < cpulog->filters->len; i++) {
+        filter = g_array_index(cpulog->filters, cpu_log_instr_filter_fn_t, i);
+        if (!filter(entry)) {
+            return;
+        }
+    }
+
     if (cpulog->starting) {
         cpulog->starting = false;
         emit_start_event(entry, cpu_get_recent_pc(env));
     }
 
-    /* Check for dfilter matches in this instruction */
-    if (debug_regions) {
-        int i, j;
-        bool match = false;
-        for (i = 0; !match && i < debug_regions->len; i++) {
-            Range *range = &g_array_index(debug_regions, Range, i);
-            match = range_contains(range, entry->pc);
-            if (match)
-                break;
-
-            for (j = 0; j < entry->mem->len; j++) {
-                log_meminfo_t *minfo =
-                    &g_array_index(entry->mem, log_meminfo_t, j);
-                match = range_contains(range, minfo->addr);
-                if (match)
-                    break;
-            }
-        }
-        if (match)
-            emit_entry_event(env, entry);
+    if (cpulog->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) {
+        cpulog->ring_head = (cpulog->ring_head + 1) % cpulog->instr_info->len;
+        if (cpulog->ring_tail == cpulog->ring_head)
+            cpulog->ring_tail =
+                (cpulog->ring_tail + 1) % cpulog->instr_info->len;
     } else {
         trace_backend->emit_instr(env, entry);
     }
@@ -818,6 +821,8 @@ void qemu_log_instr_init(CPUState *cpu)
 
     cpulog->loglevel = QEMU_LOG_INSTR_LOGLEVEL_NONE;
     cpulog->loglevel_active = false;
+    cpulog->filters = g_array_sized_new(
+        false, true, sizeof(cpu_log_instr_filter_fn_t), LOG_INSTR_FILTER_MAX);
     cpulog->instr_info = entry_ring;
     cpulog->ring_head = 0;
     cpulog->ring_tail = 0;
@@ -845,7 +850,7 @@ static void do_log_buffer_resize(CPUState *cpu, run_on_cpu_data data)
 {
     unsigned long new_size = data.host_ulong;
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(cpu->env_ptr);
-    cpu_log_instr_info_t *iinfo;
+    cpu_log_entry_t *entry;
     int i;
 
     g_array_set_size(cpulog->instr_info, new_size);
@@ -1678,6 +1683,113 @@ static trace_backend_hooks_t trace_backends[] = {
     { .emit_header = NULL,
       .emit_instr = emit_nop_entry,
       .emit_events = emit_nop_entry }
+};
+
+void qemu_log_instr_add_filter(CPUState *cpu, cpu_log_instr_filter_t filter)
+{
+    cpu_log_instr_state_t *cpulog = &cpu->log_state;
+
+    if (filter >= LOG_INSTR_FILTER_MAX) {
+        warn_report("Instruction trace filter index is invalid");
+        return;
+    }
+    /* XXX Currently we do not check for duplicates */
+    g_array_append_val(cpulog->filters, trace_filters[filter]);
+}
+
+void qemu_log_instr_allcpu_add_filter(cpu_log_instr_filter_t filter)
+{
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu)
+    {
+        qemu_log_instr_add_filter(cpu, filter);
+    }
+}
+
+void qemu_log_instr_remove_filter(CPUState *cpu, cpu_log_instr_filter_t filter)
+{
+    cpu_log_instr_state_t *cpulog = &cpu->log_state;
+    cpu_log_instr_filter_fn_t curr;
+    int i;
+
+    if (filter >= LOG_INSTR_FILTER_MAX) {
+        warn_report("Instruction trace filter index is invalid");
+        return;
+    }
+
+    for (i = 0; i < cpulog->filters->len; i++) {
+        curr = g_array_index(cpulog->filters, cpu_log_instr_filter_fn_t, i);
+        if (curr == trace_filters[filter]) {
+            g_array_remove_index_fast(cpulog->filters, i);
+            break;
+        }
+    }
+}
+
+void qemu_log_instr_allcpu_remove_filter(cpu_log_instr_filter_t filter)
+{
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu)
+    {
+        qemu_log_instr_remove_filter(cpu, filter);
+    }
+}
+
+/*
+ * LOG entry filter reusing the qemu -dfilter infrastructure to
+ * filter instructions that run from or access given address ranges.
+ */
+static bool entry_mem_regions_filter(cpu_log_entry_t *entry)
+{
+    int i, j;
+    bool match = false;
+
+    if (debug_regions == NULL) {
+        return true;
+    }
+
+    /* Check for dfilter matches in this instruction */
+    for (i = 0; !match && i < debug_regions->len; i++) {
+        Range *range = &g_array_index(debug_regions, Range, i);
+        match = range_contains(range, entry->pc);
+        if (match) {
+            break;
+        }
+
+        for (j = 0; j < entry->mem->len; j++) {
+            log_meminfo_t *minfo = &g_array_index(entry->mem, log_meminfo_t, j);
+            match = range_contains(range, minfo->addr);
+            if (match) {
+                break;
+            }
+        }
+    }
+    return match;
+}
+
+/*
+ * Interface to add/remove the -dfilter filter function from the per-cpu filter
+ * list. This is done here as -dfilter is linked in libqemu and does not have
+ * access to target-specific types.
+ * XXX Drop me
+ */
+void qemu_log_instr_mem_filter_update()
+{
+    if (debug_regions) {
+        qemu_log_instr_allcpu_add_filter(LOG_INSTR_FILTER_MEM_RANGE);
+    } else {
+        qemu_log_instr_allcpu_remove_filter(LOG_INSTR_FILTER_MEM_RANGE);
+    }
+}
+
+/*
+ * Trace filters mapping. Note that indices must match the
+ * cpu_log_instr_filter_t enum values.
+ */
+static cpu_log_instr_filter_fn_t trace_filters[] = {
+    entry_mem_regions_filter,
 };
 
 #endif /* CONFIG_TCG_LOG_INSTR */

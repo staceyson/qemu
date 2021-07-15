@@ -137,7 +137,8 @@ typedef struct {
     /* Per-CPU flags */
     int flags;
 #define QEMU_LOG_INSTR_FLAG_BUFFERED 1
-
+    /* Trace entry filter functions */
+    GArray *filters;
     /* Ring buffer of log_instr_info */
     GArray *instr_info;
     /* Ring buffer index of the next entry to write */
@@ -160,6 +161,13 @@ int qemu_log_instr_global_switch(int log_flags);
  * entries will be retained.
  */
 void qemu_log_instr_set_buffer_size(unsigned long buffer_size);
+
+/*
+ * Trigger update of the instruction entry filter reusing
+ * the -dfilter qemu option to limit tracing to only interesting
+ * memory ranges..
+ */
+void qemu_log_instr_mem_filter_update(void);
 
 #else /* ! CONFIG_TCG_LOG_INSTR */
 #define qemu_log_instr_set_backend(id) ((void)0)

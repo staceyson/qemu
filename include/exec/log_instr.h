@@ -233,6 +233,19 @@ typedef struct {
 } log_event_t;
 
 /*
+ * Handles for instruction filters/callbacks.
+ * These are used to identify and attach/detach instruction log entry filters,
+ * the rationale for this is that the filters require access to the private
+ * instruction log entry record structure and can only be defined within the
+ * instruction logging core implementation. This solution mimics the trace
+ * backend handling.
+ */
+typedef enum {
+    LOG_INSTR_FILTER_MEM_RANGE = 0,
+    LOG_INSTR_FILTER_MAX
+} cpu_log_instr_filter_t;
+
+/*
  * Request a flush of the TCG when changing loglevel outside of qemu_log_instr.
  * TODO(am2419): this should be removed from the interface.
  */
@@ -250,29 +263,24 @@ void qemu_log_instr_flush_tcg(bool request_stop);
 bool qemu_log_instr_check_enabled(CPUArchState *env);
 
 /*
- * Start instruction tracing. Note that the instruction currently being
- * executed will be replaced by a trace start event.
+ * Register a trace filter for a given CPU.
  */
-void qemu_log_instr_start(CPUArchState *env, target_ulong pc);
+void qemu_log_instr_add_filter(CPUState *env, cpu_log_instr_filter_t filter);
 
 /*
- * Stop instruction tracing.
+ * Register a trace filter for a given CPU.
  */
-void qemu_log_instr_stop(CPUArchState *env, target_ulong pc);
+void qemu_log_instr_allcpu_add_filter(cpu_log_instr_filter_t filter);
 
 /*
- * Log a switch inc CPU modes.
- * This will also trigger pause and resume of user-only logging activity,
- * depending whether the mode parameter is QEMU_LOG_INSTR_CPU_USER or not.
+ * Unregister a trace filter for a given CPU.
  */
-void qemu_log_instr_mode_switch(CPUArchState *env,
-                                qemu_log_instr_cpu_mode_t mode,
-                                target_ulong pc);
+void qemu_log_instr_remove_filter(CPUState *env, cpu_log_instr_filter_t filter);
 
 /*
- * Set the given CPU per-CPU log level.
+ * Unregister a trace filter for a given CPU.
  */
-void qemu_log_instr_set_level(CPUArchState *env, qemu_log_instr_loglevel_t lvl);
+void qemu_log_instr_allcpu_remove_filter(cpu_log_instr_filter_t filter);
 
 /*
  * Log a switch inc CPU modes.
