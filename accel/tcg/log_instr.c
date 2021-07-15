@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2020 Alfredo Mazzinghi
+ * Copyright (c) 2020,2021 Alfredo Mazzinghi
  *
  * This software was developed by SRI International and the University of
  * Cambridge Computer Laboratory (Department of Computer Science and
@@ -41,6 +41,7 @@
 #include "exec/log.h"
 #include "exec/helper-proto.h"
 #include "exec/log_instr.h"
+#include "exec/log_instr_internal.h"
 #include "exec/memop.h"
 #include "disas/disas.h"
 #include "exec/translator.h"
@@ -81,12 +82,6 @@
 
 // #define CONFIG_DEBUG_TCG
 
-#ifdef CONFIG_DEBUG_TCG
-#define log_assert(x) assert((x))
-#else
-#define log_assert(x)
-#endif
-
 #ifndef TARGET_MAX_INSN_SIZE
 #error "Target does not define TARGET_MAX_INSN_SIZE in cpu-param.h"
 #endif
@@ -96,459 +91,49 @@
  */
 extern GArray *debug_regions;
 
-/*
- * Instruction log info associated with each committed log entry.
- * This is stored in the per-cpu log cpustate.
- */
-typedef struct cpu_log_entry {
-#define cpu_log_entry_startzero asid
-    uint16_t asid;
-    int flags;
-/* Entry contains a synchronous exception */
-#define LI_FLAG_INTR_TRAP (1 << 0)
-/* Entry contains an asynchronous exception */
-#define LI_FLAG_INTR_ASYNC (1 << 1)
-#define LI_FLAG_INTR_MASK  (LI_FLAG_INTR_TRAP | LI_FLAG_INTR_ASYNC)
-/* Entry contains a CPU mode-switch and associated code */
-#define LI_FLAG_MODE_SWITCH (1 << 2)
-/* Entry contains instruction data or just events */
-#define LI_FLAG_HAS_INSTR_DATA (1 << 3)
-
-    qemu_log_instr_cpu_mode_t next_cpu_mode;
-    uint32_t intr_code;
-    target_ulong intr_vector;
-    target_ulong intr_faultaddr;
-
-    target_ulong pc;
-    /* Generic instruction opcode buffer */
-    int insn_size;
-    char insn_bytes[TARGET_MAX_INSN_SIZE];
-#define cpu_log_entry_endzero mem
-    /*
-     * Array of log_meminfo_t.
-     * For now we allow multiple accesses to be tied to one instruction.
-     * Some architectures may have multiple memory accesses
-     * in the same instruction (e.g. x86-64 pop r/m64,
-     * vector/matrix instructions, load/store pair). It is unclear
-     * whether we would treat these as multiple trace "entities".
-     */
-    GArray *mem;
-    /* Register modifications - array of log_reginfo_t */
-    GArray *regs;
-    /*
-     * Events associated with the instruction - array of log_event_t.
-     * Note that events may be present even if the entry does not contain
-     * valid instruction state. This allows the flexibility of only
-     * instrumenting a subset of the instructions/events.
-     */
-    GArray *events;
-    /* Extra text-only log */
-    GString *txt_buffer;
-} cpu_log_entry_t;
-
-/*
- * Register update info.
- * This records a CPU register update occurred during an instruction.
- */
-typedef struct {
-    uint16_t flags;
-#define LRI_CAP_REG   1
-#define LRI_HOLDS_CAP 2
-
-    const char *name;
-    union {
-        target_ulong gpr;
-#ifdef TARGET_CHERI
-        cap_register_t cap;
-#endif
-    };
-} log_reginfo_t;
-
-#define reginfo_is_cap(ri)  (ri->flags & LRI_CAP_REG)
-#define reginfo_has_cap(ri) (reginfo_is_cap(ri) && (ri->flags & LRI_HOLDS_CAP))
-
-/*
- * Memory access info.
- * This records a memory access occurred during an instruction.
- */
-typedef struct {
-    uint8_t flags;
-#define LMI_LD  1
-#define LMI_ST  2
-#define LMI_CAP 4
-    MemOp op;
-    target_ulong addr;
-    union {
-        uint64_t value;
-#ifdef TARGET_CHERI
-        cap_register_t cap;
-#endif
-    };
-} log_meminfo_t;
-
-/*
- * Callbacks defined by a trace backend implementation.
- * These are called to covert instruction tracing events to the corresponding
- * binary or text format.
- */
-struct trace_backend_hooks {
-    void (*emit_header)(CPUArchState *env);
-    void (*emit_instr)(CPUArchState *env, cpu_log_entry_t *entry);
-    void (*emit_events)(CPUArchState *env, cpu_log_entry_t *entry);
-};
-typedef struct trace_backend_hooks trace_backend_hooks_t;
-
 /* Global trace format selector. Defaults to text tracing */
 qemu_log_instr_backend_t qemu_log_instr_backend = QLI_FMT_TEXT;
 
 /* Current format callbacks. */
 static trace_backend_hooks_t *trace_backend;
 
-/* Existing format callbacks list, indexed by qemu_log_instr_backend_t */
-static trace_backend_hooks_t trace_backends[];
+static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry);
+
+/*
+ * Existing format callbacks list, indexed by qemu_log_instr_backend_t.
+ */
+static trace_backend_hooks_t trace_backends[] = {
+    { .emit_header = NULL,
+      .emit_instr = emit_text_instr,
+      .emit_events = emit_text_events },
+    { .emit_header = emit_cvtrace_header,
+      .emit_instr = emit_cvtrace_entry,
+      .emit_events = NULL },
+    { .emit_header = NULL,
+      .emit_instr = emit_nop_entry,
+      .emit_events = emit_nop_entry },
+#ifdef CONFIG_TRACE_PERFETTO
+/* { */
+/*     .emit_header = NULL, */
+/*     .emit_start = emit_perfetto_start, */
+/*     .emit_stop = emit_perfetto_stop, */
+/*     .emit_entry = emit_perfetto_entry */
+/* } */
+#endif
+};
 
 /* Existing trace filters list, indexed by cpu_log_instr_filter_t */
 static cpu_log_instr_filter_fn_t trace_filters[];
-
-/*
- * Instruction entry filter function.
- * Return false if the entry should be dropped, true otherwise.
- */
-typedef bool (*cpu_log_instr_filter_fn_t)(struct cpu_log_entry *entry);
-
-/*
- * CHERI binary trace format, originally used for MIPS only.
- * The format is limited to one entry per instruction, each
- * entry can hold at most one register modification and one
- * memory address.
- * Note that the CHERI format is the legacy MIPS format and
- * assumes big-endian byte order.
- */
-typedef struct {
-    uint8_t entry_type;
-#define CTE_NO_REG 0   /* No register is changed. */
-#define CTE_GPR    1   /* GPR change (val2) */
-#define CTE_LD_GPR 2   /* Load into GPR (val2) from address (val1) */
-#define CTE_ST_GPR 3   /* Store from GPR (val2) to address (val1) */
-#define CTE_CAP    11  /* Cap change (val2,val3,val4,val5) */
-#define CTE_LD_CAP 12  /* Load Cap (val2,val3,val4,val5) from addr (val1) */
-#define CTE_ST_CAP 13  /* Store Cap (val2,val3,val4,val5) to addr (val1) */
-    uint8_t exception; /* 0=none, 1=TLB Mod, 2=TLB Load, 3=TLB Store, etc. */
-#define CTE_EXCEPTION_NONE 31
-    uint16_t cycles; /* Currently not used. */
-    uint32_t inst;   /* Encoded instruction. */
-    uint64_t pc;     /* PC value of instruction. */
-    uint64_t val1;   /* val1 is used for memory address. */
-    uint64_t val2;   /* val2, val3, val4, val5 are used for reg content. */
-    uint64_t val3;
-    uint64_t val4;
-    uint64_t val5;
-    uint8_t thread; /* Hardware thread/CPU (i.e. cpu->cpu_index ) */
-    uint8_t asid;   /* Address Space ID */
-} __attribute__((packed)) cheri_trace_entry_t;
-
-/* Version 3 Cheri Stream Trace header info */
-#define CTE_QEMU_VERSION (0x80U + 3)
-#define CTE_QEMU_MAGIC   "CheriTraceV03"
 
 /* Number of per-cpu ring buffer entries for ring-buffer tracing mode */
 #define MIN_ENTRY_BUFFER_SIZE (1 << 16)
 
 static unsigned long reset_entry_buffer_size = MIN_ENTRY_BUFFER_SIZE;
 
-/*
- * Fetch the log state for a cpu.
- */
-static inline cpu_log_instr_state_t *get_cpu_log_state(CPUArchState *env)
+static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry)
 {
-    return &env_cpu(env)->log_state;
+    return;
 }
-
-/*
- * Fetch the given cpu current instruction info
- */
-static inline cpu_log_entry_t *get_cpu_log_entry(CPUArchState *env)
-{
-    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
-
-    return &g_array_index(cpulog->instr_info, cpu_log_entry_t,
-                          cpulog->ring_head);
-}
-
-/* Text trace format emitters */
-
-/*
- * Emit textual trace representation of memory access
- */
-static inline void emit_text_ldst(log_meminfo_t *minfo, const char *direction)
-{
-
-#ifndef TARGET_CHERI
-    log_assert((minfo->flags & LMI_CAP) == 0 &&
-               "Capability memory access without CHERI support");
-#else
-    if (minfo->flags & LMI_CAP) {
-        qemu_log("    Cap Memory %s [" TARGET_FMT_lx
-                 "] = v:%d PESBT:" TARGET_FMT_lx " Cursor:" TARGET_FMT_lx "\n",
-                 direction, minfo->addr, minfo->cap.cr_tag,
-                 CAP_cc(compress_mem)(&minfo->cap),
-                 cap_get_cursor(&minfo->cap));
-    } else
-#endif
-    {
-        switch (memop_size(minfo->op)) {
-        default:
-            qemu_log("    Unknown memory access width\n");
-            /* fallthrough */
-        case 8:
-            qemu_log("    Memory %s [" TARGET_FMT_lx "] = " TARGET_FMT_plx "\n",
-                     direction, minfo->addr, minfo->value);
-            break;
-        case 4:
-            qemu_log("    Memory %s [" TARGET_FMT_lx "] = %08x\n", direction,
-                     minfo->addr, (uint32_t)minfo->value);
-            break;
-        case 2:
-            qemu_log("    Memory %s [" TARGET_FMT_lx "] = %04x\n", direction,
-                     minfo->addr, (uint16_t)minfo->value);
-            break;
-        case 1:
-            qemu_log("    Memory %s [" TARGET_FMT_lx "] = %02x\n", direction,
-                     minfo->addr, (uint8_t)minfo->value);
-            break;
-        }
-    }
-}
-
-/*
- * Emit textual trace representation of register modification
- */
-static inline void emit_text_reg(log_reginfo_t *rinfo)
-{
-#ifndef TARGET_CHERI
-    log_assert(!reginfo_is_cap(rinfo) && "Register marked as capability "
-                                         "register whitout CHERI support");
-#else
-    if (reginfo_is_cap(rinfo)) {
-        if (reginfo_has_cap(rinfo))
-            qemu_log("    Write %s|" PRINT_CAP_FMTSTR_L1 "\n"
-                     "             |" PRINT_CAP_FMTSTR_L2 "\n",
-                     rinfo->name, PRINT_CAP_ARGS_L1(&rinfo->cap),
-                     PRINT_CAP_ARGS_L2(&rinfo->cap));
-        else
-            qemu_log("  %s <- " TARGET_FMT_lx " (setting integer value)\n",
-                     rinfo->name, rinfo->gpr);
-    } else
-#endif
-    {
-        qemu_log("    Write %s = " TARGET_FMT_lx "\n", rinfo->name, rinfo->gpr);
-    }
-}
-
-/*
- * Emit textual representation of the instruction in the given
- * trace entry to the log.
- */
-static void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
-{
-    QemuLogFile *logfile;
-    int i;
-
-    /* Dump CPU-ID:ASID + address */
-    qemu_log("[%d:%d] ", env_cpu(env)->cpu_index, entry->asid);
-
-    /*
-     * Instruction disassembly, note that we use the instruction info
-     * opcode bytes, without accessing target memory here.
-     */
-    rcu_read_lock();
-    logfile = qatomic_rcu_read(&qemu_logfile);
-    if (logfile) {
-        target_disas_buf(logfile->fd, env_cpu(env), entry->insn_bytes,
-                         sizeof(entry->insn_bytes), entry->pc, 1);
-    }
-    rcu_read_unlock();
-
-    /*
-     * TODO(am2419): what to do with injected instructions?
-     * Is the rvfi_dii_trace state valid at log commit?
-     */
-
-    /* Dump mode switching info */
-    if (entry->flags & LI_FLAG_MODE_SWITCH)
-        qemu_log("-> Switch to %s mode\n",
-                 cpu_get_mode_name(entry->next_cpu_mode));
-    /* Dump interrupt/exception info */
-    switch (entry->flags & LI_FLAG_INTR_MASK) {
-    case LI_FLAG_INTR_TRAP:
-        qemu_log("-> Exception #%u vector 0x" TARGET_FMT_lx
-                 " fault-addr 0x" TARGET_FMT_lx "\n",
-                 entry->intr_code, entry->intr_vector, entry->intr_faultaddr);
-        break;
-    case LI_FLAG_INTR_ASYNC:
-        qemu_log("-> Interrupt #%04x vector 0x" TARGET_FMT_lx "\n",
-                 entry->intr_code, entry->intr_vector);
-        break;
-    default:
-        /* No interrupt */
-        break;
-    }
-
-    /* Dump memory access */
-    for (i = 0; i < entry->mem->len; i++) {
-        log_meminfo_t *minfo = &g_array_index(entry->mem, log_meminfo_t, i);
-        if (minfo->flags & LMI_LD) {
-            emit_text_ldst(minfo, "Read");
-        } else if (minfo->flags & LMI_ST) {
-            emit_text_ldst(minfo, "Write");
-        }
-    }
-
-    /* Dump register changes and side-effects */
-    for (i = 0; i < entry->regs->len; i++) {
-        log_reginfo_t *rinfo = &g_array_index(entry->regs, log_reginfo_t, i);
-        emit_text_reg(rinfo);
-    }
-
-    /* Dump extra logged messages, if any */
-    if (entry->txt_buffer->len > 0) {
-        qemu_log("%s", entry->txt_buffer->str);
-    }
-}
-
-/*
- * Emit a textual representation of events recorded by the given trace entry.
- */
-static void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry)
-{
-    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
-    const log_event_t *event;
-    const char *log_state_op;
-    int i;
-
-    for (i = 0; i < entry->events->len; i++) {
-        event = &g_array_index(entry->events, const log_event_t, i);
-        if (event->id == LOG_EVENT_STATE) {
-            if (event->state.next_state == LOG_EVENT_STATE_START) {
-                log_state_op = "Requested";
-            } else if (event->state.next_state == LOG_EVENT_STATE_STOP) {
-                log_state_op = "Disabled";
-            }
-
-            if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_USER) {
-                qemu_log("[%u:%u] %s user-mode only instruction logging "
-                         "@ " TARGET_FMT_lx "\n",
-                         env_cpu(env)->cpu_index, cpu_get_asid(env),
-                         log_state_op, event->state.pc);
-            } else {
-                qemu_log("[%u:%u] %s instruction logging @ " TARGET_FMT_lx
-                         "\n",
-                         env_cpu(env)->cpu_index, cpu_get_asid(env),
-                         log_state_op, event->state.pc);
-            }
-        }
-    }
-}
-
-/* CHERI trace V3 format emitters */
-
-/*
- * Emit cvtrace trace trace header. This is a magic byte + string
- */
-static void emit_cvtrace_header(CPUArchState *env)
-{
-    FILE *logfile = qemu_log_lock();
-    char buffer[sizeof(cheri_trace_entry_t)];
-
-    buffer[0] = CTE_QEMU_VERSION;
-    g_strlcpy(buffer + 1, CTE_QEMU_MAGIC, sizeof(buffer) - 2);
-    fwrite(buffer, sizeof(buffer), 1, logfile);
-    qemu_log_unlock(logfile);
-}
-
-/*
- * Emit cvtrace trace entry.
- * Note: this format is very MIPS-specific.
- */
-static void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry)
-{
-    FILE *logfile;
-    cheri_trace_entry_t ct_entry;
-    /* TODO(am2419): this should be a per-cpu counter. */
-    static uint16_t cycles;
-    uint32_t *insn = (uint32_t *)&entry->insn_bytes[0];
-
-    ct_entry.entry_type = CTE_NO_REG;
-    ct_entry.thread = (uint8_t)env_cpu(env)->cpu_index;
-    ct_entry.asid = (uint8_t)entry->asid;
-    ct_entry.pc = cpu_to_be64(entry->pc);
-    ct_entry.cycles = cpu_to_be16(cycles++);
-    /*
-     * TODO(am2419): The instruction bytes are alread in target byte-order,
-     * however cheritrace does not currently expect this.
-     */
-    ct_entry.inst = cpu_to_be32(*insn);
-    switch (entry->flags & LI_FLAG_INTR_MASK) {
-    case LI_FLAG_INTR_TRAP:
-        ct_entry.exception = (uint8_t)(entry->intr_code & 0xff);
-    case LI_FLAG_INTR_ASYNC:
-        ct_entry.exception = 0;
-    default:
-        ct_entry.exception = CTE_EXCEPTION_NONE;
-    }
-
-    if (entry->regs->len) {
-        log_reginfo_t *rinfo = &g_array_index(entry->regs, log_reginfo_t, 0);
-#ifndef TARGET_CHERI
-        log_assert(!reginfo_is_cap(rinfo) && "Capability register access "
-                                             "without CHERI support");
-#else
-        if (reginfo_is_cap(rinfo)) {
-            cap_register_t intcap;
-            cap_register_t *cr = &rinfo->cap;
-
-            if (!reginfo_has_cap(rinfo)) {
-                // cvtrace expects a null capability in the integer case
-                cr = null_capability(&intcap);
-            }
-            uint64_t metadata = (((uint64_t)cr->cr_tag << 63) |
-                                 ((uint64_t)cap_get_otype_signext(cr) << 32) |
-                                 ((uint64_t)COMBINED_PERMS_VALUE(cr) << 1) |
-                                 (uint64_t)(cap_is_unsealed(cr) ? 0 : 1));
-
-            ct_entry.entry_type = CTE_CAP;
-            ct_entry.val2 = cpu_to_be64(metadata);
-            ct_entry.val3 = cpu_to_be64(cap_get_cursor(cr));
-            ct_entry.val4 = cpu_to_be64(cap_get_base(cr));
-            ct_entry.val5 = cpu_to_be64(cap_get_length_sat(cr));
-        } else
-#endif
-        {
-            ct_entry.entry_type = CTE_GPR;
-            ct_entry.val2 = cpu_to_be64(rinfo->gpr);
-        }
-    }
-
-    if (entry->mem->len) {
-        log_meminfo_t *minfo = &g_array_index(entry->mem, log_meminfo_t, 0);
-#ifndef TARGET_CHERI
-        log_assert((minfo->flags & LMI_CAP) == 0 && "Capability memory access "
-                                                    "without CHERI support");
-#endif
-        ct_entry.val1 = cpu_to_be64(minfo->addr);
-        // Hack to avoid checking for GPR or CAP
-        if (minfo->flags & LMI_LD)
-            ct_entry.entry_type += 1;
-        else if (minfo->flags & LMI_ST)
-            ct_entry.entry_type += 2;
-    }
-
-    logfile = qemu_log_lock();
-    fwrite(&ct_entry, sizeof(ct_entry), 1, logfile);
-    qemu_log_unlock(logfile);
-}
-
-/* Core instruction logging implementation */
 
 static inline void emit_start_event(cpu_log_entry_t *entry, target_ulong pc)
 {
@@ -1525,8 +1110,7 @@ void helper_qemu_log_printf_dump(CPUArchState *env)
         return;
     }
 
-    cpu_log_instr_info_t *iinfo = get_cpu_log_instr_info(env);
-
+    cpu_log_entry_t *entry = get_cpu_log_entry(env);
     while (valid) {
         size_t ndx = ctz64(valid);
         valid ^= (1 << ndx);
@@ -1534,7 +1118,7 @@ void helper_qemu_log_printf_dump(CPUArchState *env)
             cpulog->qemu_log_printf_buf.args +
             (ndx * QEMU_LOG_PRINTF_ARG_MAX);
         const char *fmt = cpulog->qemu_log_printf_buf.fmts[ndx];
-        g_string_append_printf_union_args(iinfo->txt_buffer, fmt, args);
+        g_string_append_printf_union_args(entry->txt_buffer, fmt, args);
     }
 }
 
@@ -1667,23 +1251,6 @@ void helper_log_value(CPUArchState *env, const void *ptr, uint64_t value)
 {
     qemu_maybe_log_instr_extra(env, "%s: " TARGET_FMT_plx "\n", ptr, value);
 }
-
-static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry) {}
-
-/*
- * Hooks for each trace format
- */
-static trace_backend_hooks_t trace_backends[] = {
-    { .emit_header = NULL,
-      .emit_instr = emit_text_instr,
-      .emit_events = emit_text_events },
-    { .emit_header = emit_cvtrace_header,
-      .emit_instr = emit_cvtrace_entry,
-      .emit_events = NULL },
-    { .emit_header = NULL,
-      .emit_instr = emit_nop_entry,
-      .emit_events = emit_nop_entry }
-};
 
 void qemu_log_instr_add_filter(CPUState *cpu, cpu_log_instr_filter_t filter)
 {
