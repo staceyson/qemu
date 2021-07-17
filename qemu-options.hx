@@ -4212,11 +4212,11 @@ SRST
     Set CHERI instruction trace buffer size to the given number of entries
 ERST
 
-DEF("cheri-trace-format", HAS_ARG, QEMU_OPTION_cheri_trace_format, \
-"-cheri-trace-format [text|cvtrace]     Select CHERI trace mode.\n", QEMU_ARCH_ALL)
+DEF("cheri-trace-backend", HAS_ARG, QEMU_OPTION_cheri_trace_backend, \
+"-cheri-trace-backend [text|cvtrace|stats]     Select CHERI trace mode.\n", QEMU_ARCH_ALL)
 SRST
-``-cheri-trace-format type``
-    Set CHERI trace format to <type> (text or cvtrace)
+``-cheri-trace-backend type``
+    Set CHERI trace backend to <type> (text, cvtrace or stats)
 ERST
 
 DEF("cheri-c2e-on-unrepresentable", 0, QEMU_OPTION_cheri_c2e_on_unrepresentable, \

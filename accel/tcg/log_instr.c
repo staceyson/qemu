@@ -103,15 +103,24 @@ static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry);
  * Existing format callbacks list, indexed by qemu_log_instr_backend_t.
  */
 static trace_backend_hooks_t trace_backends[] = {
-    { .emit_header = NULL,
+    { .init = NULL,
+      .emit_header = NULL,
       .emit_instr = emit_text_instr,
       .emit_events = emit_text_events },
-    { .emit_header = emit_cvtrace_header,
+    { .init = NULL,
+      .emit_header = emit_cvtrace_header,
       .emit_instr = emit_cvtrace_entry,
       .emit_events = NULL },
-    { .emit_header = NULL,
+    { .init = NULL,
+      .emit_header = NULL,
       .emit_instr = emit_nop_entry,
       .emit_events = emit_nop_entry },
+#ifdef CONFIG_TRACE_STATS
+    { .init = init_stats_backend,
+      .emit_header = NULL,
+      .emit_instr = emit_stats_entry,
+      .emit_events = emit_stats_events },
+#endif
 };
 
 /* Existing trace filters list, indexed by cpu_log_instr_filter_t */
@@ -415,13 +424,18 @@ void qemu_log_instr_init(CPUState *cpu)
     cpulog->ring_tail = 0;
     reset_log_buffer(cpulog, entry);
 
-    // Make sure we are using the correct trace format.
+    /* Make sure we are using the correct trace format. */
     if (trace_backend == NULL) {
         trace_backend = &trace_backends[qemu_log_instr_backend];
-        // Only emit header on first init
+        /* Only emit header on first init */
         if (trace_backend->emit_header) {
+            /* XXX this can probably go away and just use init() */
             trace_backend->emit_header(cpu->env_ptr);
         }
+    }
+    /* Initialize backend state on this CPU */
+    if (trace_backend->init) {
+        trace_backend->init(cpu->env_ptr);
     }
 
     /* If we are starting with instruction logging enabled, switch it on now */

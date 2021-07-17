@@ -134,6 +134,7 @@ typedef struct {
  * binary or text format.
  */
 struct trace_backend_hooks {
+    void (*init)(CPUArchState *env);
     void (*emit_header)(CPUArchState *env);
     void (*emit_instr)(CPUArchState *env, cpu_log_entry_t *entry);
     void (*emit_events)(CPUArchState *env, cpu_log_entry_t *entry);
@@ -152,6 +153,10 @@ void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry);
 /* CVTrace backend */
 void emit_cvtrace_header(CPUArchState *env);
 void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry);
+/* Stats backen */
+void init_stats_backend(CPUArchState *env);
+void emit_stats_entry(CPUArchState *env, cpu_log_entry_t *entry);
+void emit_stats_events(CPUArchState *env, cpu_log_entry_t *entry);
 
 #ifdef CONFIG_DEBUG_TCG
 #define log_assert(x) assert((x))

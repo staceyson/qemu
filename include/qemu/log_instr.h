@@ -54,6 +54,9 @@ typedef enum {
     QEMU_LOG_INSTR_BACKEND_TEXT = 0,
     QEMU_LOG_INSTR_BACKEND_CVTRACE = 1,
     QEMU_LOG_INSTR_BACKEND_NOP = 2,
+#ifdef CONFIG_TRACE_STATS
+    QEMU_LOG_INSTR_BACKEND_STATS = 3,
+#endif
 } qemu_log_instr_backend_t;
 
 extern qemu_log_instr_backend_t qemu_log_instr_backend;
@@ -145,8 +148,10 @@ typedef struct {
     size_t ring_head;
     /* Ring buffer index of the first entry to dump */
     size_t ring_tail;
-
+    /* Accumulated debug printf buffer */
     qemu_log_printf_buf_t qemu_log_printf_buf;
+    /* Private trace backend state */
+    void *backend_data;
 } cpu_log_instr_state_t;
 
 /*

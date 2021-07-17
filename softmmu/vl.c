@@ -3458,6 +3458,10 @@ void qemu_init(int argc, char **argv, char **envp)
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_TEXT);
                 } else if (strcmp(optarg, "cvtrace") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_CVTRACE);
+#ifdef CONFIG_TRACE_STATS
+                } else if (strcmp(optarg, "stats") == 0) {
+                    qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_STATS);
+#endif
                 } else {
                     printf("Invalid choice for cheri-trace-format: '%s'\n", optarg);
                     exit(1);

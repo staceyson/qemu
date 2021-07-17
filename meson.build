@@ -1904,8 +1904,14 @@ util_ss = util_ss.apply(config_all, strict: false)
 libqemuutil = static_library('qemuutil',
                              sources: util_ss.sources() + stub_ss.sources() + genh,
                              dependencies: [util_ss.dependencies(), m, glib, socket, malloc])
-qemuutil = declare_dependency(link_with: libqemuutil,
-                              sources: genh + version_res)
+
+qemuutil_libs = [libqemuutil]
+if 'CONFIG_TRACE_STATS' in config_host
+    subdir('stats')
+    qemuutil_libs += libqemustats
+endif
+
+qemuutil = declare_dependency(link_with: qemuutil_libs,
 
 if have_system or have_user
   decodetree = generator(find_program('scripts/decodetree.py'),

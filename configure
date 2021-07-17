@@ -357,6 +357,7 @@ pvrdma="$default_feature"
 gprof="no"
 debug_tcg="no"
 tcg_log_instr="yes"
+trace_stats="no"
 rvfi_dii="no"
 debug="no"
 sanitizers="no"
@@ -1038,6 +1039,10 @@ for opt do
   --enable-tcg-log-instr) tcg_log_instr="yes"
   ;;
   --disable-tcg-log-instr) tcg_log_instr="no"
+  ;;
+  --enable-trace-stats) trace_stats="yes"
+  ;;
+  --disable-trace-stats) trace_stats="no"
   ;;
   --enable-rvfi-dii) rvfi_dii="yes"
   ;;
@@ -5514,6 +5519,9 @@ if test "$debug_tcg" = "yes" ; then
 fi
 if test "$tcg_log_instr" = "yes" ; then
   echo "CONFIG_TCG_LOG_INSTR=y" >> $config_host_mak
+fi
+if test "$trace_stats" = "yes" ; then
+    echo "CONFIG_TRACE_STATS=y" >> $config_host_mak
 fi
 if test "$rvfi_dii" = "yes" ; then
   echo "CONFIG_RVFI_DII=y" >> $config_host_mak
