@@ -92,7 +92,7 @@
 extern GArray *debug_regions;
 
 /* Global trace format selector. Defaults to text tracing */
-qemu_log_instr_backend_t qemu_log_instr_backend = QLI_FMT_TEXT;
+qemu_log_instr_backend_t qemu_log_instr_backend = QEMU_LOG_INSTR_BACKEND_TEXT;
 
 /* Current format callbacks. */
 static trace_backend_hooks_t *trace_backend;

@@ -51,9 +51,9 @@
  * Instruction logging format
  */
 typedef enum {
-    QLI_FMT_TEXT = 0,
-    QLI_FMT_CVTRACE = 1,
-    QLI_FMT_NOP = 2,
+    QEMU_LOG_INSTR_BACKEND_TEXT = 0,
+    QEMU_LOG_INSTR_BACKEND_CVTRACE = 1,
+    QEMU_LOG_INSTR_BACKEND_NOP = 2,
 } qemu_log_instr_backend_t;
 
 extern qemu_log_instr_backend_t qemu_log_instr_backend;
