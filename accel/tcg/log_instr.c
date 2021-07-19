@@ -112,14 +112,6 @@ static trace_backend_hooks_t trace_backends[] = {
     { .emit_header = NULL,
       .emit_instr = emit_nop_entry,
       .emit_events = emit_nop_entry },
-#ifdef CONFIG_TRACE_PERFETTO
-/* { */
-/*     .emit_header = NULL, */
-/*     .emit_start = emit_perfetto_start, */
-/*     .emit_stop = emit_perfetto_stop, */
-/*     .emit_entry = emit_perfetto_entry */
-/* } */
-#endif
 };
 
 /* Existing trace filters list, indexed by cpu_log_instr_filter_t */
@@ -175,6 +167,16 @@ static void reset_log_buffer(cpu_log_instr_state_t *cpulog,
 }
 
 /* Common instruction commit implementation */
+static void do_instr_emit(CPUArchState *env, cpu_log_entry_t *entry)
+{
+    if (entry->flags & LI_FLAG_HAS_INSTR_DATA) {
+        trace_backend->emit_instr(env, entry);
+    }
+    if (entry->events->len > 0) {
+        trace_backend->emit_events(env, entry);
+    }
+}
+
 static void do_instr_commit(CPUArchState *env)
 {
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
@@ -206,7 +208,7 @@ static void do_instr_commit(CPUArchState *env)
             cpulog->ring_tail =
                 (cpulog->ring_tail + 1) % cpulog->instr_info->len;
     } else {
-        trace_backend->emit_instr(env, entry);
+        do_instr_emit(env, entry);
     }
 }
 
@@ -1072,7 +1074,14 @@ void qemu_log_instr_flush(CPUArchState *env)
 {
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
     size_t curr = cpulog->ring_tail;
-    cpu_log_entry_t *entry;
+    cpu_log_entry_t *entry = get_cpu_log_entry(env);
+    log_event_t event;
+
+    /* Emit FLUSH event so that it can be picked up by backends */
+    event.id = LOG_EVENT_STATE;
+    event.state.next_state = LOG_EVENT_STATE_FLUSH;
+    event.state.pc = entry->pc;
+    qemu_log_instr_event(env, &event);
 
     /*
      * If tracing is disabled, force the commit of events in this
@@ -1087,7 +1096,7 @@ void qemu_log_instr_flush(CPUArchState *env)
 
     while (curr != cpulog->ring_head) {
         entry = &g_array_index(cpulog->instr_info, cpu_log_entry_t, curr);
-        trace_backend->emit_instr(env, entry);
+        do_instr_emit(env, entry);
         curr = (curr + 1) % cpulog->instr_info->len;
     }
     cpulog->ring_tail = cpulog->ring_head;
@@ -1251,6 +1260,10 @@ void helper_log_value(CPUArchState *env, const void *ptr, uint64_t value)
 {
     qemu_maybe_log_instr_extra(env, "%s: " TARGET_FMT_plx "\n", ptr, value);
 }
+
+/*
+ * Instruction stream filtering
+ */
 
 void qemu_log_instr_add_filter(CPUState *cpu, cpu_log_instr_filter_t filter)
 {

@@ -197,6 +197,8 @@ void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry)
                 log_state_op = "Requested";
             } else if (event->state.next_state == LOG_EVENT_STATE_STOP) {
                 log_state_op = "Disabled";
+            } else {
+                continue;
             }
 
             if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_USER) {

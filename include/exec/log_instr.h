@@ -202,7 +202,8 @@ typedef enum {
  */
 typedef enum {
     LOG_EVENT_STATE_START,
-    LOG_EVENT_STATE_STOP
+    LOG_EVENT_STATE_STOP,
+    LOG_EVENT_STATE_FLUSH
 } log_event_trace_state_t;
 
 typedef struct {
