@@ -33,7 +33,14 @@
 #include "qemu/osdep.h"
 #include "exec/log_instr.h"
 #include "exec/helper-proto.h"
+#include "cheri-lazy-capregs.h"
 #include "cpu.h"
+
+#ifdef TARGET_CHERI
+#define get_gpr_value(env, regnum) get_capreg_cursor(env, regnum)
+#else
+#define get_gpr_value(env, regnum) (env->gpr[regnum])
+#endif
 
 void HELPER(riscv_log_gpr_write)(CPURISCVState *env, uint32_t regnum,
                                  target_ulong value)
@@ -51,4 +58,34 @@ void HELPER(riscv_log_instr)(CPURISCVState *env, target_ulong pc,
         qemu_log_instr_asid(env, cpu_get_asid(env, pc));
         qemu_log_instr(env, pc, (char *)&opcode, opcode_size);
     }
+}
+
+/*
+ * Events are triggered by a magic no-op. The arguments for the event
+ * are passed via the target ABI argument registers.
+ * There is a maximum of 7 arguments supported.
+ * void event_noop(event_type, a1, a2, a3, a4, a5, a6, a7)
+ *
+ * We access GPRs directly from env to work around the argument limit
+ * for TCG helpers.
+ */
+void HELPER(riscv_log_instr_event)(CPURISCVState *env, target_ulong pc)
+{
+    log_event_t event;
+
+    if (!qemu_log_instr_enabled(env)) {
+        return;
+    }
+
+    event.id = get_gpr_value(env, 10);
+    switch (event.id) {
+    case LOG_EVENT_CTX_SWITCH:
+        event.ctx_switch.pid = get_gpr_value(env, 11);
+        event.ctx_switch.tid = get_gpr_value(env, 12);
+        event.ctx_switch.cid = get_gpr_value(env, 13);
+        break;
+    default:
+        return;
+    }
+    qemu_log_instr_event(env, &event);
 }
