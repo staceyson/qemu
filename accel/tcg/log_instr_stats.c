@@ -77,6 +77,7 @@ void emit_stats_events(CPUArchState *env, cpu_log_entry_t *entry)
     struct cpu_stats *stats = get_cpu_stats(env);
     QemuLogFile *logfile;
     const log_event_t *event;
+    bool header = false;
     int i;
 
     log_assert(stats != NULL && "Missing stats backend data");
@@ -88,8 +89,13 @@ void emit_stats_events(CPUArchState *env, cpu_log_entry_t *entry)
                 rcu_read_lock();
                 logfile = qatomic_rcu_read(&qemu_logfile);
                 if (logfile) {
-                    qemu_stats_addr_range_hist_dump(stats->pc_hist,
-                                                    fileno(logfile->fd), true);
+                    if (ftell(logfile->fd) == 0) {
+                        header = true;
+                    }
+                    qemu_stats_addr_range_hist_dump(
+                        stats->pc_hist, fileno(logfile->fd),
+                        env_cpu(env)->cpu_index, header);
+                    fflush(logfile->fd);
                 }
                 rcu_read_unlock();
                 break;

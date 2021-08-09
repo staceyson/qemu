@@ -77,18 +77,19 @@ void qemu_stats_addr_range_hist_insert(addr_range_hist_t handle, uint64_t start,
 }
 
 void qemu_stats_addr_range_hist_dump(addr_range_hist_t handle, int fd,
-                                     bool csv_header)
+                                     int cpu_id, bool csv_header)
 {
     auto &hist = handle2imap(handle);
     io::file_descriptor_sink fd_sink(fd, io::never_close_handle);
     io::stream<io::file_descriptor_sink> ostream(fd_sink);
 
     if (csv_header)
-        ostream << "CPU, start, end, count" << std::endl;
+        ostream << "CPU,start,end,count" << std::endl;
     for (const auto &keyval : hist) {
         auto &range = keyval.first;
-        ostream << std::hex << range.lower() << "," << range.upper() << ","
-                << std::dec << keyval.second << std::endl;
+        ostream << cpu_id << "," << std::hex << range.lower() << ","
+                << range.upper() << "," << std::dec << keyval.second
+                << std::endl;
     }
 }
 
