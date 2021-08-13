@@ -43,8 +43,10 @@ __attribute__((weak)) int qemu_log_instr_global_switch(int log_flags)
     return log_flags;
 }
 
-__attribute__((weak)) void qemu_log_instr_mem_filter_update(void);
-__attribute__((weak)) void qemu_log_instr_mem_filter_update()
+__attribute__((weak)) void qemu_log_instr_add_startup_filter(
+    cpu_log_instr_filter_t);
+__attribute__((weak))
+void qemu_log_instr_add_startup_filter(cpu_log_instr_filter_t f)
 {
     /* Real implementation in accel/tcg/log_instr.c */
     warn_report("Calling no-op %s\r", __func__);
@@ -296,7 +298,7 @@ void qemu_set_dfilter_ranges(const char *filter_spec, Error **errp)
 out:
     g_strfreev(ranges);
 #ifdef CONFIG_TCG_LOG_INSTR
-    qemu_log_instr_mem_filter_update();
+    qemu_log_instr_add_startup_filter(LOG_INSTR_FILTER_MEM_RANGE);
 #endif
 }
 

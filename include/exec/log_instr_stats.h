@@ -32,8 +32,7 @@
 #include <stdbool.h>
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 #ifdef CONFIG_TRACE_STATS
@@ -47,10 +46,11 @@ typedef struct addr_range_hist *addr_range_hist_t;
  */
 addr_range_hist_t qemu_stats_addr_range_hist_create(void);
 void qemu_stats_addr_range_hist_destroy(addr_range_hist_t handle);
-void qemu_stats_addr_range_hist_insert(addr_range_hist_t handle,
-    uint64_t start, uint64_t end, uint64_t value);
+void qemu_stats_addr_range_hist_insert(addr_range_hist_t handle, uint64_t start,
+                                       uint64_t end, uint64_t value);
 void qemu_stats_addr_range_hist_dump(addr_range_hist_t handle, int fd,
-    int cpu_id, bool csv_header);
+                                     int cpu_id, bool csv_header);
+void qemu_stats_addr_range_hist_clear(addr_range_hist_t handle);
 
 #endif /* CONFIG_TRACE_STATS */
 #ifdef __cplusplus

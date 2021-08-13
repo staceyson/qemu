@@ -234,19 +234,6 @@ typedef struct {
 } log_event_t;
 
 /*
- * Handles for instruction filters/callbacks.
- * These are used to identify and attach/detach instruction log entry filters,
- * the rationale for this is that the filters require access to the private
- * instruction log entry record structure and can only be defined within the
- * instruction logging core implementation. This solution mimics the trace
- * backend handling.
- */
-typedef enum {
-    LOG_INSTR_FILTER_MEM_RANGE = 0,
-    LOG_INSTR_FILTER_MAX
-} cpu_log_instr_filter_t;
-
-/*
  * Request a flush of the TCG when changing loglevel outside of qemu_log_instr.
  * TODO(am2419): this should be removed from the interface.
  */

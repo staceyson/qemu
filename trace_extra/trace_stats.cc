@@ -26,7 +26,7 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
-#include "stats/stats.h"
+#include "exec/log_instr_stats.h"
 
 #include <iostream>
 #include <utility>
@@ -91,6 +91,12 @@ void qemu_stats_addr_range_hist_dump(addr_range_hist_t handle, int fd,
                 << range.upper() << "," << std::dec << keyval.second
                 << std::endl;
     }
+}
+
+void qemu_stats_addr_range_hist_clear(addr_range_hist_t handle)
+{
+    auto &hist = handle2imap(handle);
+    hist.clear();
 }
 
 } /* C */

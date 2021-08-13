@@ -40,7 +40,7 @@
 #include "qemu/log.h"
 #include "exec/log_instr.h"
 #include "exec/log_instr_internal.h"
-#include "stats/stats.h"
+#include "exec/log_instr_stats.h"
 
 struct cpu_stats {
     addr_range_hist_t pc_hist;
@@ -98,6 +98,7 @@ void emit_stats_events(CPUArchState *env, cpu_log_entry_t *entry)
                     fflush(logfile->fd);
                 }
                 rcu_read_unlock();
+                qemu_stats_addr_range_hist_clear(stats->pc_hist);
                 break;
             }
         }

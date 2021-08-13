@@ -4219,6 +4219,13 @@ SRST
     Set CHERI trace backend to <type> (text, cvtrace or stats)
 ERST
 
+DEF("cheri-trace-filters", HAS_ARG, QEMU_OPTION_cheri_trace_filters, \
+"-cheri-trace-filters [event]     Select trace filters to use.\n", QEMU_ARCH_ALL)
+SRST
+``-cheri-trace-filters name[,...]``
+    Set CHERI trace filters to use. Available filters are: events.
+ERST
+
 DEF("cheri-c2e-on-unrepresentable", 0, QEMU_OPTION_cheri_c2e_on_unrepresentable, \
     "-cheri-c2e-on-unrepresentable     Generate C2E exception when a capability becomes unrepresentable\n", QEMU_ARCH_ALL)
 SRST

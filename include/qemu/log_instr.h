@@ -158,6 +158,20 @@ typedef struct {
 } cpu_log_instr_state_t;
 
 /*
+ * Handles for instruction filters/callbacks.
+ * These are used to identify and attach/detach instruction log entry filters,
+ * the rationale for this is that the filters require access to the private
+ * instruction log entry record structure and can only be defined within the
+ * instruction logging core implementation. This solution mimics the trace
+ * backend handling.
+ */
+typedef enum {
+    LOG_INSTR_FILTER_MEM_RANGE = 0,
+    LOG_FILTER_EVENTS = 1,
+    LOG_INSTR_FILTER_MAX
+} cpu_log_instr_filter_t;
+
+/*
  * Initialize instruction logging for a cpu.
  */
 void qemu_log_instr_init(CPUState *cpu);
@@ -169,6 +183,21 @@ int qemu_log_instr_global_switch(int log_flags);
  * entries will be retained.
  */
 void qemu_log_instr_set_buffer_size(unsigned long buffer_size);
+
+/*
+ * Set filters to activate from string names.
+ * This is safe to call during startup as if no CPU exists, we
+ * will set the filters when the CPU startup occurs.
+ */
+void qemu_log_instr_set_cli_filters(const char *filter_spec, Error **errp);
+
+/*
+ * Add a trace filter during startup. This will be activated on all the CPUs
+ * that are initialized after the call.
+ * After the CPUs have been initialized, this will set the filters on all
+ * existing CPUs.
+ */
+void qemu_log_instr_add_startup_filter(cpu_log_instr_filter_t filter);
 
 /*
  * Trigger update of the instruction entry filter reusing

@@ -35,6 +35,7 @@
 #include "qemu/osdep.h"
 #include "qemu/range.h"
 #include "qemu/log.h"
+#include "qapi/error.h"
 #include "cpu-param.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
@@ -134,6 +135,9 @@ static trace_backend_hooks_t trace_backends[] = {
 
 /* Existing trace filters list, indexed by cpu_log_instr_filter_t */
 static cpu_log_instr_filter_fn_t trace_filters[];
+
+/* Trace filters to activate when a new CPU is seen */
+static GArray *reset_filters;
 
 /* Number of per-cpu ring buffer entries for ring-buffer tracing mode */
 #define MIN_ENTRY_BUFFER_SIZE (1 << 16)
@@ -454,6 +458,13 @@ void qemu_log_instr_init(CPUState *cpu)
     else if (qemu_loglevel_mask(CPU_LOG_INSTR))
         do_cpu_loglevel_switch(
             cpu, RUN_ON_CPU_HOST_INT(QEMU_LOG_INSTR_LOGLEVEL_ALL));
+
+    if (reset_filters != NULL) {
+        for (i = 0; i < reset_filters->len; i++) {
+            qemu_log_instr_add_filter(
+                cpu, g_array_index(reset_filters, cpu_log_instr_filter_t, i));
+        }
+    }
 }
 
 static void do_log_buffer_resize(CPUState *cpu, run_on_cpu_data data)
@@ -1291,13 +1302,22 @@ void helper_log_value(CPUArchState *env, const void *ptr, uint64_t value)
 void qemu_log_instr_add_filter(CPUState *cpu, cpu_log_instr_filter_t filter)
 {
     cpu_log_instr_state_t *cpulog = &cpu->log_state;
+    cpu_log_instr_filter_fn_t new_fn, fn;
+    int i;
 
     if (filter >= LOG_INSTR_FILTER_MAX) {
         warn_report("Instruction trace filter index is invalid");
         return;
     }
-    /* XXX Currently we do not check for duplicates */
-    g_array_append_val(cpulog->filters, trace_filters[filter]);
+    new_fn = trace_filters[filter];
+    /* Check for duplicates */
+    for (i = 0; i < cpulog->filters->len; i++) {
+        fn = g_array_index(cpulog->filters, cpu_log_instr_filter_fn_t, i);
+        if (new_fn == fn) {
+            return;
+        }
+    }
+    g_array_append_val(cpulog->filters, new_fn);
 }
 
 void qemu_log_instr_allcpu_add_filter(cpu_log_instr_filter_t filter)
@@ -1340,8 +1360,37 @@ void qemu_log_instr_allcpu_remove_filter(cpu_log_instr_filter_t filter)
     }
 }
 
+void qemu_log_instr_add_startup_filter(cpu_log_instr_filter_t filter)
+{
+    if (reset_filters == NULL) {
+        reset_filters =
+            g_array_new(false, true, sizeof(cpu_log_instr_filter_t));
+    }
+
+    if (first_cpu == NULL) {
+        g_array_append_val(reset_filters, filter);
+    } else {
+        qemu_log_instr_allcpu_add_filter(filter);
+    }
+}
+
+void qemu_log_instr_set_cli_filters(const char *filter_spec, Error **errp)
+{
+    gchar **names = g_strsplit(filter_spec, ",", 0);
+    int i;
+
+    for (i = 0; names[i]; i++) {
+        if (strcmp(names[i], "events") == 0) {
+            qemu_log_instr_add_startup_filter(LOG_FILTER_EVENTS);
+        } else {
+            error_setg(errp, "Invalid trace filter name");
+            break;
+        }
+    }
+}
+
 /*
- * LOG entry filter reusing the qemu -dfilter infrastructure to
+ * Log entry filter reusing the qemu -dfilter infrastructure to
  * filter instructions that run from or access given address ranges.
  */
 static bool entry_mem_regions_filter(cpu_log_entry_t *entry)
@@ -1373,18 +1422,14 @@ static bool entry_mem_regions_filter(cpu_log_entry_t *entry)
 }
 
 /*
- * Interface to add/remove the -dfilter filter function from the per-cpu filter
- * list. This is done here as -dfilter is linked in libqemu and does not have
- * access to target-specific types.
- * XXX Drop me
+ * Log entry filter to retain only entries with events attached.
  */
-void qemu_log_instr_mem_filter_update()
+static bool entry_event_filter(cpu_log_entry_t *entry)
 {
-    if (debug_regions) {
-        qemu_log_instr_allcpu_add_filter(LOG_INSTR_FILTER_MEM_RANGE);
-    } else {
-        qemu_log_instr_allcpu_remove_filter(LOG_INSTR_FILTER_MEM_RANGE);
+    if (entry->events->len > 0) {
+        return true;
     }
+    return false;
 }
 
 /*
@@ -1393,5 +1438,6 @@ void qemu_log_instr_mem_filter_update()
  */
 static cpu_log_instr_filter_fn_t trace_filters[] = {
     entry_mem_regions_filter,
+    entry_event_filter,
 };
 #endif /* CONFIG_TCG_LOG_INSTR */

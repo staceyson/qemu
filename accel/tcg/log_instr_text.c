@@ -192,7 +192,8 @@ void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry)
 
     for (i = 0; i < entry->events->len; i++) {
         event = &g_array_index(entry->events, const log_event_t, i);
-        if (event->id == LOG_EVENT_STATE) {
+        switch (event->id) {
+        case LOG_EVENT_STATE:
             if (event->state.next_state == LOG_EVENT_STATE_START) {
                 log_state_op = "Requested";
             } else if (event->state.next_state == LOG_EVENT_STATE_STOP) {
@@ -212,6 +213,12 @@ void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry)
                          env_cpu(env)->cpu_index, cpu_get_asid(env),
                          log_state_op, event->state.pc);
             }
+            break;
+        case LOG_EVENT_CTX_SWITCH:
+            qemu_log("Context switch pid=0x" TARGET_FMT_lx
+                     " tid=0x" TARGET_FMT_lx " cid=0x" TARGET_FMT_lx "\n",
+                     event->ctx_switch.pid, event->ctx_switch.tid,
+                     event->ctx_switch.cid);
         }
     }
 }

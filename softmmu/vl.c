@@ -3470,6 +3470,9 @@ void qemu_init(int argc, char **argv, char **envp)
             case QEMU_OPTION_cheri_trace_buffer_size:
                 qemu_log_instr_set_buffer_size(strtoul(optarg, NULL, 0));
                 break;
+            case QEMU_OPTION_cheri_trace_filters:
+                qemu_log_instr_set_cli_filters(optarg, &error_fatal);
+                break;
 #endif /* CONFIG_TCG_LOG_INSTR */
 
 #ifdef TARGET_CHERI
