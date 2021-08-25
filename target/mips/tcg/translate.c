@@ -322,26 +322,6 @@ enum {
     R6_OPC_SDBBP    = 0x0e | OPC_SPECIAL,
 };
 
-/* Multiplication variants of the vr54xx. */
-#define MASK_MUL_VR54XX(op)         (MASK_SPECIAL(op) | (op & (0x1F << 6)))
-
-enum {
-    OPC_VR54XX_MULS    = (0x03 << 6) | OPC_MULT,
-    OPC_VR54XX_MULSU   = (0x03 << 6) | OPC_MULTU,
-    OPC_VR54XX_MACC    = (0x05 << 6) | OPC_MULT,
-    OPC_VR54XX_MACCU   = (0x05 << 6) | OPC_MULTU,
-    OPC_VR54XX_MSAC    = (0x07 << 6) | OPC_MULT,
-    OPC_VR54XX_MSACU   = (0x07 << 6) | OPC_MULTU,
-    OPC_VR54XX_MULHI   = (0x09 << 6) | OPC_MULT,
-    OPC_VR54XX_MULHIU  = (0x09 << 6) | OPC_MULTU,
-    OPC_VR54XX_MULSHI  = (0x0B << 6) | OPC_MULT,
-    OPC_VR54XX_MULSHIU = (0x0B << 6) | OPC_MULTU,
-    OPC_VR54XX_MACCHI  = (0x0D << 6) | OPC_MULT,
-    OPC_VR54XX_MACCHIU = (0x0D << 6) | OPC_MULTU,
-    OPC_VR54XX_MSACHI  = (0x0F << 6) | OPC_MULT,
-    OPC_VR54XX_MSACHIU = (0x0F << 6) | OPC_MULTU,
-};
-
 /* REGIMM (rt field) opcodes */
 #define MASK_REGIMM(op)             (MASK_OP_MAJOR(op) | (op & (0x1F << 16)))
 
@@ -1475,58 +1455,6 @@ static TCGv cpu_statcounters_icount_kernel, cpu_statcounters_icount_user;
 
 #include "exec/gen-icount.h"
 
-#define gen_helper_0e0i(name, arg) do {                           \
-    TCGv_i32 helper_tmp = tcg_const_i32(arg);                     \
-    gen_helper_##name(cpu_env, helper_tmp);                       \
-    tcg_temp_free_i32(helper_tmp);                                \
-    } while (0)
-
-#define gen_helper_0e1i(name, arg1, arg2) do {                    \
-    TCGv_i32 helper_tmp = tcg_const_i32(arg2);                    \
-    gen_helper_##name(cpu_env, arg1, helper_tmp);                 \
-    tcg_temp_free_i32(helper_tmp);                                \
-    } while (0)
-
-#define gen_helper_1e0i(name, ret, arg1) do {                     \
-    TCGv_i32 helper_tmp = tcg_const_i32(arg1);                    \
-    gen_helper_##name(ret, cpu_env, helper_tmp);                  \
-    tcg_temp_free_i32(helper_tmp);                                \
-    } while (0)
-
-#define gen_helper_1e1i(name, ret, arg1, arg2) do {               \
-    TCGv_i32 helper_tmp = tcg_const_i32(arg2);                    \
-    gen_helper_##name(ret, cpu_env, arg1, helper_tmp);            \
-    tcg_temp_free_i32(helper_tmp);                                \
-    } while (0)
-
-#define gen_helper_0e2i(name, arg1, arg2, arg3) do {              \
-    TCGv_i32 helper_tmp = tcg_const_i32(arg3);                    \
-    gen_helper_##name(cpu_env, arg1, arg2, helper_tmp);           \
-    tcg_temp_free_i32(helper_tmp);                                \
-    } while (0)
-
-#define gen_helper_1e2i(name, ret, arg1, arg2, arg3) do {         \
-    TCGv_i32 helper_tmp = tcg_const_i32(arg3);                    \
-    gen_helper_##name(ret, cpu_env, arg1, arg2, helper_tmp);      \
-    tcg_temp_free_i32(helper_tmp);                                \
-    } while (0)
-
-#define gen_helper_0e3i(name, arg1, arg2, arg3, arg4) do {        \
-    TCGv_i32 helper_tmp = tcg_const_i32(arg4);                    \
-    gen_helper_##name(cpu_env, arg1, arg2, arg3, helper_tmp);     \
-    tcg_temp_free_i32(helper_tmp);                                \
-    } while (0)
-
-
-#define gen_helper_2_consti32(name, arg, arg2) do {               \
-    TCGv_i32 helper_tmp = tcg_const_i32(arg);                     \
-    TCGv_i32 helper_tmp2 = tcg_const_i32(arg2);                   \
-    gen_helper_##name(cpu_env, helper_tmp, helper_tmp2);          \
-    tcg_temp_free_i32(helper_tmp);                                \
-    tcg_temp_free_i32(helper_tmp2);                               \
-    } while(0)
-
-
 #define DISAS_STOP       DISAS_TARGET_0
 #define DISAS_EXIT       DISAS_TARGET_1
 
@@ -1681,18 +1609,15 @@ static inline void restore_cpu_state(CPUMIPSState *env, DisasContext *ctx)
 
 void generate_exception_err(DisasContext *ctx, MipsExcp excp, int err)
 {
-    TCGv_i32 texcp = tcg_const_i32(excp);
-    TCGv_i32 terr = tcg_const_i32(err);
     save_cpu_state(ctx, 1);
-    gen_helper_raise_exception_err(cpu_env, texcp, terr);
-    tcg_temp_free_i32(terr);
-    tcg_temp_free_i32(texcp);
+    gen_helper_raise_exception_err(cpu_env, tcg_constant_i32(excp),
+                                   tcg_constant_i32(err));
     ctx->base.is_jmp = DISAS_NORETURN;
 }
 
 void generate_exception(DisasContext *ctx, int excp)
 {
-    gen_helper_0e0i(raise_exception, excp);
+    gen_helper_raise_exception(cpu_env, tcg_constant_i32(excp));
 }
 
 void generate_exception_end(DisasContext *ctx, int excp)
@@ -2318,8 +2243,9 @@ static inline void op_ld_##insn(TCGv ret, TCGv arg1, int mem_idx,          \
 #else
 #define OP_LD_ATOMIC(insn, fname)                                          \
 static inline void op_ld_##insn(TCGv ret, TCGv_cap_checked_ptr arg1,       \
-                                int mem_idx, DisasContext *ctx) {          \
-    gen_helper_1e1i(insn, ret, arg1, mem_idx);                             \
+                                int mem_idx, DisasContext *ctx)            \
+{                                                                          \
+    gen_helper_##insn(ret, cpu_env, arg1, tcg_constant_i32(mem_idx));      \
 }
 #endif
 OP_LD_ATOMIC(ll, ld32s);
@@ -2407,9 +2333,9 @@ static void gen_ld(DisasContext *ctx, uint32_t opc,
          */
         tcg_gen_qemu_ld_tl_with_checked_addr(t1, ddc_interposed, mem_idx, MO_UB);
         tcg_gen_andi_tl(t1, (TCGv)ddc_interposed, 7);
-#ifndef TARGET_WORDS_BIGENDIAN
-        tcg_gen_xori_tl(t1, t1, 7);
-#endif
+        if (!cpu_is_bigendian(ctx)) {
+            tcg_gen_xori_tl(t1, t1, 7);
+        }
         tcg_gen_shli_tl(t1, t1, 3);
         tcg_gen_andi_tl((TCGv)ddc_interposed, (TCGv)ddc_interposed, ~7);
         tcg_gen_qemu_ld_tl_with_checked_addr(t0, ddc_interposed, mem_idx, MO_TEQ);
@@ -2432,9 +2358,9 @@ static void gen_ld(DisasContext *ctx, uint32_t opc,
          */
         tcg_gen_qemu_ld_tl_with_checked_addr(t1, ddc_interposed, mem_idx, MO_UB);
         tcg_gen_andi_tl(t1, (TCGv)ddc_interposed, 7);
-#ifdef TARGET_WORDS_BIGENDIAN
-        tcg_gen_xori_tl(t1, t1, 7);
-#endif
+        if (cpu_is_bigendian(ctx)) {
+            tcg_gen_xori_tl(t1, t1, 7);
+        }
         tcg_gen_shli_tl(t1, t1, 3);
         tcg_gen_andi_tl((TCGv)ddc_interposed, (TCGv)ddc_interposed, ~7);
         tcg_gen_qemu_ld_tl_with_checked_addr(t0, ddc_interposed, mem_idx, MO_TEQ);
@@ -2517,9 +2443,9 @@ static void gen_ld(DisasContext *ctx, uint32_t opc,
          */
         tcg_gen_qemu_ld_tl_with_checked_addr(t1, ddc_interposed, mem_idx, MO_UB);
         tcg_gen_andi_tl(t1, (TCGv)ddc_interposed, 3);
-#ifndef TARGET_WORDS_BIGENDIAN
-        tcg_gen_xori_tl(t1, t1, 3);
-#endif
+        if (!cpu_is_bigendian(ctx)) {
+            tcg_gen_xori_tl(t1, t1, 3);
+        }
         tcg_gen_shli_tl(t1, t1, 3);
         tcg_gen_andi_tl((TCGv)ddc_interposed, (TCGv)ddc_interposed, ~3);
         tcg_gen_qemu_ld_tl_with_checked_addr(t0, ddc_interposed, mem_idx, MO_TEUL);
@@ -2546,9 +2472,9 @@ static void gen_ld(DisasContext *ctx, uint32_t opc,
          */
         tcg_gen_qemu_ld_tl_with_checked_addr(t1, ddc_interposed, mem_idx, MO_UB);
         tcg_gen_andi_tl(t1, (TCGv)ddc_interposed, 3);
-#ifdef TARGET_WORDS_BIGENDIAN
-        tcg_gen_xori_tl(t1, t1, 3);
-#endif
+        if (cpu_is_bigendian(ctx)) {
+            tcg_gen_xori_tl(t1, t1, 3);
+        }
         tcg_gen_shli_tl(t1, t1, 3);
         tcg_gen_andi_tl((TCGv)ddc_interposed, (TCGv)ddc_interposed, ~3);
         tcg_gen_qemu_ld_tl_with_checked_addr(t0, ddc_interposed, mem_idx, MO_TEUL);
@@ -4213,70 +4139,6 @@ static void gen_mul_txx9(DisasContext *ctx, uint32_t opc,
     tcg_temp_free(t1);
 }
 
-static void gen_mul_vr54xx(DisasContext *ctx, uint32_t opc,
-                           int rd, int rs, int rt)
-{
-    TCGv t0 = tcg_temp_new();
-    TCGv t1 = tcg_temp_new();
-
-    gen_load_gpr(t0, rs);
-    gen_load_gpr(t1, rt);
-
-    switch (opc) {
-    case OPC_VR54XX_MULS:
-        gen_helper_muls(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MULSU:
-        gen_helper_mulsu(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MACC:
-        gen_helper_macc(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MACCU:
-        gen_helper_maccu(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MSAC:
-        gen_helper_msac(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MSACU:
-        gen_helper_msacu(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MULHI:
-        gen_helper_mulhi(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MULHIU:
-        gen_helper_mulhiu(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MULSHI:
-        gen_helper_mulshi(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MULSHIU:
-        gen_helper_mulshiu(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MACCHI:
-        gen_helper_macchi(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MACCHIU:
-        gen_helper_macchiu(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MSACHI:
-        gen_helper_msachi(t0, cpu_env, t0, t1);
-        break;
-    case OPC_VR54XX_MSACHIU:
-        gen_helper_msachiu(t0, cpu_env, t0, t1);
-        break;
-    default:
-        MIPS_INVAL("mul vr54xx");
-        gen_reserved_instruction(ctx);
-        goto out;
-    }
-    gen_store_gpr(t0, rd);
-
- out:
-    tcg_temp_free(t0);
-    tcg_temp_free(t1);
-}
-
 static void gen_cl(DisasContext *ctx, uint32_t opc,
                    int rd, int rs)
 {
@@ -4979,9 +4841,9 @@ static void gen_loongson_lswc2(DisasContext *ctx, int rt,
             t1 = tcg_temp_new();
             tcg_gen_qemu_ld_tl(t1, t0, ctx->mem_idx, MO_UB);
             tcg_gen_andi_tl(t1, t0, 3);
-#ifndef TARGET_WORDS_BIGENDIAN
-            tcg_gen_xori_tl(t1, t1, 3);
-#endif
+            if (!cpu_is_bigendian(ctx)) {
+                tcg_gen_xori_tl(t1, t1, 3);
+            }
             tcg_gen_shli_tl(t1, t1, 3);
             tcg_gen_andi_tl(t0, t0, ~3);
             tcg_gen_qemu_ld_tl(t0, t0, ctx->mem_idx, MO_TEUL);
@@ -5009,9 +4871,9 @@ static void gen_loongson_lswc2(DisasContext *ctx, int rt,
             t1 = tcg_temp_new();
             tcg_gen_qemu_ld_tl(t1, t0, ctx->mem_idx, MO_UB);
             tcg_gen_andi_tl(t1, t0, 3);
-#ifdef TARGET_WORDS_BIGENDIAN
-            tcg_gen_xori_tl(t1, t1, 3);
-#endif
+            if (cpu_is_bigendian(ctx)) {
+                tcg_gen_xori_tl(t1, t1, 3);
+            }
             tcg_gen_shli_tl(t1, t1, 3);
             tcg_gen_andi_tl(t0, t0, ~3);
             tcg_gen_qemu_ld_tl(t0, t0, ctx->mem_idx, MO_TEUL);
@@ -5041,9 +4903,9 @@ static void gen_loongson_lswc2(DisasContext *ctx, int rt,
             t1 = tcg_temp_new();
             tcg_gen_qemu_ld_tl(t1, t0, ctx->mem_idx, MO_UB);
             tcg_gen_andi_tl(t1, t0, 7);
-#ifndef TARGET_WORDS_BIGENDIAN
-            tcg_gen_xori_tl(t1, t1, 7);
-#endif
+            if (!cpu_is_bigendian(ctx)) {
+                tcg_gen_xori_tl(t1, t1, 7);
+            }
             tcg_gen_shli_tl(t1, t1, 3);
             tcg_gen_andi_tl(t0, t0, ~7);
             tcg_gen_qemu_ld_tl(t0, t0, ctx->mem_idx, MO_TEQ);
@@ -5063,9 +4925,9 @@ static void gen_loongson_lswc2(DisasContext *ctx, int rt,
             t1 = tcg_temp_new();
             tcg_gen_qemu_ld_tl(t1, t0, ctx->mem_idx, MO_UB);
             tcg_gen_andi_tl(t1, t0, 7);
-#ifdef TARGET_WORDS_BIGENDIAN
-            tcg_gen_xori_tl(t1, t1, 7);
-#endif
+            if (cpu_is_bigendian(ctx)) {
+                tcg_gen_xori_tl(t1, t1, 7);
+            }
             tcg_gen_shli_tl(t1, t1, 3);
             tcg_gen_andi_tl(t0, t0, ~7);
             tcg_gen_qemu_ld_tl(t0, t0, ctx->mem_idx, MO_TEQ);
@@ -5227,7 +5089,6 @@ static void gen_loongson_lsdc2(DisasContext *ctx, int rt,
         break;
 #endif
     case OPC_GSLWXC1:
-        check_cp1_enabled(ctx);
         gen_base_offset_addr(ctx, t0, rs, offset);
         if (rd) {
             gen_op_addr_add(ctx, t0, cpu_gpr[rd], t0);
@@ -5240,7 +5101,6 @@ static void gen_loongson_lsdc2(DisasContext *ctx, int rt,
         break;
 #if defined(TARGET_MIPS64)
     case OPC_GSLDXC1:
-        check_cp1_enabled(ctx);
         gen_base_offset_addr(ctx, t0, rs, offset);
         if (rd) {
             gen_op_addr_add(ctx, t0, cpu_gpr[rd], t0);
@@ -9813,12 +9673,7 @@ static void gen_mttr(CPUMIPSState *env, DisasContext *ctx, int rd, int rt,
             break;
         case 3:
             /* XXX: For now we support only a single FPU context. */
-            {
-                TCGv_i32 fs_tmp = tcg_const_i32(rd);
-
-                gen_helper_0e2i(ctc1, t0, fs_tmp, rt);
-                tcg_temp_free_i32(fs_tmp);
-            }
+            gen_helper_0e2i(ctc1, t0, tcg_constant_i32(rd), rt);
             /* Stop translation as we may have changed hflags */
             ctx->base.is_jmp = DISAS_STOP;
             break;
@@ -10446,12 +10301,7 @@ static void gen_cp1(DisasContext *ctx, uint32_t opc, int rt, int fs)
     case OPC_CTC1:
         gen_load_gpr(t0, rt);
         save_cpu_state(ctx, 0);
-        {
-            TCGv_i32 fs_tmp = tcg_const_i32(fs);
-
-            gen_helper_0e2i(ctc1, t0, fs_tmp, rt);
-            tcg_temp_free_i32(fs_tmp);
-        }
+        gen_helper_0e2i(ctc1, t0, tcg_constant_i32(fs), rt);
         /* Stop translation as we may have changed hflags */
         ctx->base.is_jmp = DISAS_STOP;
         break;
@@ -12221,17 +12071,17 @@ static void gen_flt3_arith(DisasContext *ctx, uint32_t opc,
             gen_set_label(l1);
             tcg_gen_brcondi_tl(TCG_COND_NE, t0, 4, l2);
             tcg_temp_free(t0);
-#ifdef TARGET_WORDS_BIGENDIAN
-            gen_load_fpr32(ctx, fp, fs);
-            gen_load_fpr32h(ctx, fph, ft);
-            gen_store_fpr32h(ctx, fp, fd);
-            gen_store_fpr32(ctx, fph, fd);
-#else
-            gen_load_fpr32h(ctx, fph, fs);
-            gen_load_fpr32(ctx, fp, ft);
-            gen_store_fpr32(ctx, fph, fd);
-            gen_store_fpr32h(ctx, fp, fd);
-#endif
+            if (cpu_is_bigendian(ctx)) {
+                gen_load_fpr32(ctx, fp, fs);
+                gen_load_fpr32h(ctx, fph, ft);
+                gen_store_fpr32h(ctx, fp, fd);
+                gen_store_fpr32(ctx, fph, fd);
+            } else {
+                gen_load_fpr32h(ctx, fph, fs);
+                gen_load_fpr32(ctx, fp, ft);
+                gen_store_fpr32(ctx, fph, fd);
+                gen_store_fpr32h(ctx, fp, fd);
+            }
             gen_set_label(l2);
             tcg_temp_free_i32(fp);
             tcg_temp_free_i32(fph);
@@ -12663,7 +12513,8 @@ static void gen_branch(DisasContext *ctx, int insn_bytes)
 
             if (ctx->base.singlestep_enabled) {
                 save_cpu_state(ctx, 0);
-                gen_helper_0e0i(raise_exception, EXCP_DEBUG);
+                gen_helper_raise_exception(cpu_env,
+                                           tcg_constant_i32(EXCP_DEBUG));
             }
             tcg_gen_exit_tb(NULL, 0);
             break;
@@ -14888,13 +14739,12 @@ static void decode_opc_special_tx79(CPUMIPSState *env, DisasContext *ctx)
 
 static void decode_opc_special_legacy(CPUMIPSState *env, DisasContext *ctx)
 {
-    int rs, rt, rd, sa;
+    int rs, rt, rd;
     uint32_t op1;
 
     rs = (ctx->opcode >> 21) & 0x1f;
     rt = (ctx->opcode >> 16) & 0x1f;
     rd = (ctx->opcode >> 11) & 0x1f;
-    sa = (ctx->opcode >> 6) & 0x1f;
 
     op1 = MASK_SPECIAL(ctx->opcode);
     switch (op1) {
@@ -14924,13 +14774,7 @@ static void decode_opc_special_legacy(CPUMIPSState *env, DisasContext *ctx)
         break;
     case OPC_MULT:
     case OPC_MULTU:
-        if (sa) {
-            check_insn(ctx, INSN_VR54XX);
-            op1 = MASK_MUL_VR54XX(ctx->opcode);
-            gen_mul_vr54xx(ctx, op1, rd, rs, rt);
-        } else {
-            gen_muldiv(ctx, op1, rd & 3, rs, rt);
-        }
+        gen_muldiv(ctx, op1, rd & 3, rs, rt);
         break;
     case OPC_DIV:
     case OPC_DIVU:
@@ -14947,7 +14791,7 @@ static void decode_opc_special_legacy(CPUMIPSState *env, DisasContext *ctx)
         break;
 #endif
     case OPC_JR:
-        gen_compute_branch(ctx, op1, 4, rs, rd, sa, 4);
+        gen_compute_branch(ctx, op1, 4, rs, 0, 0, 4);
         break;
     case OPC_SPIM:
 #ifdef MIPS_STRICT_STANDARD
@@ -15061,7 +14905,7 @@ static void decode_opc_special(CPUMIPSState *env, DisasContext *ctx)
         MIPS_INVAL("PMON / selsl");
         gen_reserved_instruction(ctx);
 #else
-        gen_helper_0e0i(pmon, sa);
+        gen_helper_pmon(cpu_env, tcg_constant_i32(sa));
 #endif
         break;
     case OPC_SYSCALL:
@@ -16511,12 +16355,8 @@ static bool decode_opc_legacy(CPUMIPSState *env, DisasContext *ctx)
         /* Treat as NOP. */
         break;
     case OPC_PREF:
-        if (ctx->insn_flags & INSN_R5900) {
-            /* Treat as NOP. */
-        } else {
-            check_insn(ctx, ISA_MIPS4 | ISA_MIPS_R1);
-            /* Treat as NOP. */
-        }
+        check_insn(ctx, ISA_MIPS4 | ISA_MIPS_R1 | INSN_R5900);
+        /* Treat as NOP. */
         break;
 
     /* Floating point (COP1). */
@@ -16996,6 +16836,14 @@ static void decode_opc(CPUMIPSState *env, DisasContext *ctx)
 
     /* Transition to the auto-generated decoder.  */
 
+    /* Vendor specific extensions */
+    if (cpu_supports_isa(env, INSN_R5900) && decode_ext_txx9(ctx, ctx->opcode)) {
+        return;
+    }
+    if (cpu_supports_isa(env, INSN_VR54XX) && decode_ext_vr54xx(ctx, ctx->opcode)) {
+        return;
+    }
+
     /* ISA extensions */
     if (ase_msa_available(env) && decode_ase_msa(ctx, ctx->opcode)) {
         return;
@@ -17003,9 +16851,6 @@ static void decode_opc(CPUMIPSState *env, DisasContext *ctx)
 
     /* ISA (from latest to oldest) */
     if (cpu_supports_isa(env, ISA_MIPS_R6) && decode_isa_rel6(ctx, ctx->opcode)) {
-        return;
-    }
-    if (cpu_supports_isa(env, INSN_R5900) && decode_ext_txx9(ctx, ctx->opcode)) {
         return;
     }
 
@@ -17024,6 +16869,7 @@ static void mips_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     ctx->page_start = ctx->base.pc_first & TARGET_PAGE_MASK;
     ctx->saved_pc = -1;
     ctx->insn_flags = env->insn_flags;
+    ctx->CP0_Config0 = env->CP0_Config0;
     ctx->CP0_Config1 = env->CP0_Config1;
     ctx->CP0_Config2 = env->CP0_Config2;
     ctx->CP0_Config3 = env->CP0_Config3;

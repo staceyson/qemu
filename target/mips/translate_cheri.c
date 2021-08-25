@@ -1319,12 +1319,14 @@ static void gen_cp2 (DisasContext *ctx, uint32_t opc, int r16, int r11, int r6)
                 break;
             case OPC_CREADHWR_NI:   /* 0x0d << 6 */
                 check_cop2x(ctx);
-                gen_helper_2_consti32(creadhwr, r16, r11);
+                gen_helper_creadhwr(cpu_env, tcg_constant_i32(r16),
+                                    tcg_constant_i32(r11));
                 opn = "creadhwr";
                 break;
             case OPC_CWRITEHWR_NI:  /* 0x0e << 6 */
                 check_cop2x(ctx);
-                gen_helper_2_consti32(cwritehwr, r16, r11);
+                gen_helper_cwritehwr(cpu_env, tcg_constant_i32(r16),
+                                     tcg_constant_i32(r11));
                 if (r11 == CP2HWR_DDC) {
                     // When DDC changes we have to exit the current translation
                     // block since we cache DDC properties in the flags to
@@ -1372,7 +1374,8 @@ static void gen_cp2 (DisasContext *ctx, uint32_t opc, int r16, int r11, int r6)
                 break;
             case OPC_CSEALENTRY_NI:   /* 0x1d << 6 */
                 check_cop2x(ctx);
-                gen_helper_2_consti32(csealentry, r16, r11);
+                gen_helper_csealentry(cpu_env, tcg_constant_i32(r16),
+                                      tcg_constant_i32(r11));
                 opn = "csealentry";
                 break;
             case OPC_CLOADTAGS_NI:   /* 0x1e << 6 */
