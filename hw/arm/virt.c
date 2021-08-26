@@ -1862,11 +1862,6 @@ static void machvirt_init(MachineState *machine)
     }
 
     if (vms->secure) {
-        if (kvm_enabled()) {
-            error_report("mach-virt: KVM does not support Security extensions");
-            exit(1);
-        }
-
         /*
          * The Secure view of the world is the same as the NonSecure,
          * but with a few extra devices. Create it as a container region
