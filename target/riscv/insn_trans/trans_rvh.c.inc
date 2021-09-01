@@ -17,150 +17,153 @@
  */
 
 #ifndef CONFIG_USER_ONLY
-static void check_access(DisasContext *ctx) {
+static bool check_access(DisasContext *ctx)
+{
     if (!ctx->hlsx) {
         if (ctx->virt_enabled) {
             generate_exception(ctx, RISCV_EXCP_VIRT_INSTRUCTION_FAULT);
         } else {
             generate_exception(ctx, RISCV_EXCP_ILLEGAL_INST);
         }
+        return false;
     }
+    return true;
 }
 #endif
 
-static bool gen_hlv(DisasContext *ctx, int rs1, int rd, MemOp memop)
+static bool do_hlv(DisasContext *ctx, arg_r2 *a, MemOp mop)
 {
-    REQUIRE_EXT(ctx, RVH);
-#ifndef CONFIG_USER_ONLY
-    check_access(ctx);
-#ifdef TARGET_CHERI
-    if (ctx->capmode)
-        return gen_cap_load_mem_idx(ctx, rd, rs1, 0,
-            ctx->mem_idx | TB_FLAGS_PRIV_HYP_ACCESS_MASK, memop);
-#endif
-
-    TCGv t0 = tcg_temp_new();
-    TCGv t1 = tcg_temp_new();
-
-    gen_get_gpr(t0, rs1);
-
-    gen_ddc_interposed_ld_tl(ctx, t1, /* Update addr in-place */ NULL, t0,
-        ctx->mem_idx | TB_FLAGS_PRIV_HYP_ACCESS_MASK, memop);
-    gen_set_gpr(rd, t1);
-
-    tcg_temp_free(t0);
-    tcg_temp_free(t1);
-    return true;
-#else
+#ifdef CONFIG_USER_ONLY
     return false;
-#endif
-}
-
-
-static bool gen_hsv(DisasContext *ctx, int rs1, int rs2, MemOp memop)
-{
-    REQUIRE_EXT(ctx, RVH);
-#ifndef CONFIG_USER_ONLY
-    check_access(ctx);
-#ifdef TARGET_CHERI
-    if (ctx->capmode)
-        return gen_cap_store_mem_idx(ctx, rs1, rs2, 0,
-            ctx->mem_idx | TB_FLAGS_PRIV_HYP_ACCESS_MASK, memop);
-#endif
-
-    TCGv t0 = tcg_temp_new();
-    TCGv dat = tcg_temp_new();
-
-    gen_get_gpr(t0, rs1);
-    gen_get_gpr(dat, rs2);
-
-    gen_ddc_interposed_st_tl(ctx, dat, /* Update addr in-place */ NULL, t0,
-        ctx->mem_idx | TB_FLAGS_PRIV_HYP_ACCESS_MASK, memop);
-
-    tcg_temp_free(t0);
-    tcg_temp_free(dat);
-    return true;
 #else
-    return false;
+    if (check_access(ctx)) {
+        int mem_idx = ctx->mem_idx | TB_FLAGS_PRIV_HYP_ACCESS_MASK;
+#ifdef TARGET_CHERI
+        if (ctx->capmode)
+            return gen_cap_load_mem_idx(ctx, a->rd, a->rs1, 0,
+                mem_idx, mop);
+#endif
+
+        TCGv dest = dest_gpr(ctx, a->rd);
+        TCGv addr = get_gpr(ctx, a->rs1, EXT_NONE);
+        gen_ddc_interposed_ld_tl(ctx, dest, /* Update addr in-place */ NULL,
+            addr, mem_idx, mop);
+        gen_set_gpr(ctx, a->rd, dest);
+    }
+    return true;
 #endif
 }
 
 static bool trans_hlv_b(DisasContext *ctx, arg_hlv_b *a)
 {
-    return gen_hlv(ctx, a->rs1, a->rd, MO_SB);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hlv(ctx, a, MO_SB);
 }
 
 static bool trans_hlv_h(DisasContext *ctx, arg_hlv_h *a)
 {
-    return gen_hlv(ctx, a->rs1, a->rd, MO_TESW);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hlv(ctx, a, MO_TESW);
 }
 
 static bool trans_hlv_w(DisasContext *ctx, arg_hlv_w *a)
 {
-    return gen_hlv(ctx, a->rs1, a->rd, MO_TESL);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hlv(ctx, a, MO_TESL);
 }
 
 static bool trans_hlv_bu(DisasContext *ctx, arg_hlv_bu *a)
 {
-    return gen_hlv(ctx, a->rs1, a->rd, MO_UB);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hlv(ctx, a, MO_UB);
 }
 
 static bool trans_hlv_hu(DisasContext *ctx, arg_hlv_hu *a)
 {
-    return gen_hlv(ctx, a->rs1, a->rd, MO_TEUW);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hlv(ctx, a, MO_TEUW);
+}
+
+static bool do_hsv(DisasContext *ctx, arg_r2_s *a, MemOp mop)
+{
+#ifdef CONFIG_USER_ONLY
+    return false;
+#else
+    if (check_access(ctx)) {
+        int mem_idx = ctx->mem_idx | TB_FLAGS_PRIV_HYP_ACCESS_MASK;
+#ifdef TARGET_CHERI
+        if (ctx->capmode)
+            return gen_cap_store_mem_idx(ctx, a->rs1, a->rs2, 0, mem_idx, mop);
+#endif
+        
+        TCGv addr = get_gpr(ctx, a->rs1, EXT_NONE);
+        TCGv data = get_gpr(ctx, a->rs2, EXT_NONE);
+
+        gen_ddc_interposed_st_tl(ctx, data, /* Update addr in-place */ NULL,
+            addr, mem_idx, mop);
+    }
+    return true;
+#endif
 }
 
 static bool trans_hsv_b(DisasContext *ctx, arg_hsv_b *a)
 {
-    return gen_hsv(ctx, a->rs1, a->rs2, MO_SB);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hsv(ctx, a, MO_SB);
 }
 
 static bool trans_hsv_h(DisasContext *ctx, arg_hsv_h *a)
 {
-    return gen_hsv(ctx, a->rs1, a->rs2, MO_TESW);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hsv(ctx, a, MO_TESW);
 }
 
 static bool trans_hsv_w(DisasContext *ctx, arg_hsv_w *a)
 {
-    return gen_hsv(ctx, a->rs1, a->rs2, MO_TESL);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hsv(ctx, a, MO_TESL);
 }
 
 static bool trans_hlv_wu(DisasContext *ctx, arg_hlv_wu *a)
 {
     REQUIRE_64BIT(ctx);
-    return gen_hlv(ctx, a->rs1, a->rd, MO_TEUL);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hlv(ctx, a, MO_TEUL);
 }
 
 static bool trans_hlv_d(DisasContext *ctx, arg_hlv_d *a)
 {
-
     REQUIRE_64BIT(ctx);
-    return gen_hlv(ctx, a->rs1, a->rd, MO_TEQ);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hlv(ctx, a, MO_TEQ);
 }
 
 static bool trans_hsv_d(DisasContext *ctx, arg_hsv_d *a)
 {
     REQUIRE_64BIT(ctx);
-    return gen_hsv(ctx, a->rs1, a->rs2, MO_TEQ);
+    REQUIRE_EXT(ctx, RVH);
+    return do_hsv(ctx, a, MO_TEQ);
 }
+
+#ifndef CONFIG_USER_ONLY
+static bool do_hlvx(DisasContext *ctx, arg_r2 *a,
+                    void (*func)(TCGv, TCGv_env, TCGv))
+{
+    if (check_access(ctx)) {
+        TCGv dest = dest_gpr(ctx, a->rd);
+        TCGv addr = get_gpr(ctx, a->rs1, EXT_NONE);
+        func(dest, cpu_env, addr);
+        gen_set_gpr(ctx, a->rd, dest);
+    }
+    return true;
+}
+#endif
 
 static bool trans_hlvx_hu(DisasContext *ctx, arg_hlvx_hu *a)
 {
     REQUIRE_EXT(ctx, RVH);
 #ifndef CONFIG_USER_ONLY
-    check_access(ctx);
-
-    TCGv t0 = tcg_temp_new();
-    TCGv t1 = tcg_temp_new();
-
-    gen_get_gpr(t0, a->rs1);
-
-    gen_helper_hyp_hlvx_hu(t1, cpu_env, t0);
-    gen_set_gpr(a->rd, t1);
-
-    tcg_temp_free(t0);
-    tcg_temp_free(t1);
-    return true;
+    return do_hlvx(ctx, a, gen_helper_hyp_hlvx_hu);
 #else
     return false;
 #endif
@@ -170,19 +173,7 @@ static bool trans_hlvx_wu(DisasContext *ctx, arg_hlvx_wu *a)
 {
     REQUIRE_EXT(ctx, RVH);
 #ifndef CONFIG_USER_ONLY
-    check_access(ctx);
-
-    TCGv t0 = tcg_temp_new();
-    TCGv t1 = tcg_temp_new();
-
-    gen_get_gpr(t0, a->rs1);
-
-    gen_helper_hyp_hlvx_wu(t1, cpu_env, t0);
-    gen_set_gpr(a->rd, t1);
-
-    tcg_temp_free(t0);
-    tcg_temp_free(t1);
-    return true;
+    return do_hlvx(ctx, a, gen_helper_hyp_hlvx_wu);
 #else
     return false;
 #endif

@@ -130,7 +130,7 @@ TCGv_i64 cpu_reg(DisasContext *s, int reg);
 
 #define DDC_ENV_OFFSET offsetof(CPUArchState, ddc)
 #define target_get_gpr_global(ctx, reg) (assert(0), (TCGv)NULL)
-#define target_get_gpr(ctx, t, reg) gen_get_gpr((TCGv)t, reg)
+#define target_get_gpr(ctx, t, reg) gen_get_gpr(ctx, (TCGv)t, reg)
     static inline void _gen_set_gpr(DisasContext *ctx, int reg_num_dst, TCGv t,
                                     bool clear_pesbt);
 #define target_set_gpr(ctx, reg, t) _gen_set_gpr(ctx, reg, (TCGv)t, false)

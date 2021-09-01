@@ -46,7 +46,7 @@ static inline bool gen_cheri_int_cap(DisasContext *ctx, int rd, int cs,
     TCGv_i32 source_regnum = tcg_const_i32(cs);
     TCGv result = tcg_temp_new();
     gen_func(result, cpu_env, source_regnum);
-    gen_set_gpr(rd, result);
+    gen_set_gpr(ctx, rd, result);
     tcg_temp_free(result);
     tcg_temp_free_i32(source_regnum);
     return true;
@@ -71,12 +71,12 @@ static inline bool gen_cheri_cap_cap(int cd, int cs,
 
 typedef void(cheri_cap_int_helper)(TCGv_env, TCGv_i32, TCGv);
 static inline QEMU_ALWAYS_INLINE bool
-gen_cheri_cap_int_plus_imm(int cd, int rs, target_long imm,
+gen_cheri_cap_int_plus_imm(DisasContext *ctx, int cd, int rs, target_long imm,
                            cheri_cap_int_helper *gen_func)
 {
     TCGv_i32 dest_regnum = tcg_const_i32(cd);
     TCGv gpr_value = tcg_temp_new();
-    gen_get_gpr(gpr_value, rs);
+    gen_get_gpr(ctx, gpr_value, rs);
     tcg_gen_addi_tl(gpr_value, gpr_value, imm);
     gen_func(cpu_env, dest_regnum, gpr_value);
     tcg_temp_free(gpr_value);
@@ -84,10 +84,10 @@ gen_cheri_cap_int_plus_imm(int cd, int rs, target_long imm,
     return true;
 }
 
-static inline bool gen_cheri_cap_int(int cd, int rs,
+static inline bool gen_cheri_cap_int(DisasContext *ctx, int cd, int rs,
                                      cheri_cap_int_helper *gen_func)
 {
-    return gen_cheri_cap_int_plus_imm(cd, rs, 0, gen_func);
+    return gen_cheri_cap_int_plus_imm(ctx, cd, rs, 0, gen_func);
 }
 
 typedef void(cheri_int_int_helper)(TCGv, TCGv_env, TCGv);
@@ -96,9 +96,9 @@ static inline bool gen_cheri_int_int(DisasContext *ctx, int rd, int rs,
 {
     TCGv result = tcg_temp_new();
     TCGv gpr_src_value = tcg_temp_new();
-    gen_get_gpr(gpr_src_value, rs);
+    gen_get_gpr(ctx, gpr_src_value, rs);
     gen_func(result, cpu_env, gpr_src_value);
-    gen_set_gpr(rd, result);
+    gen_set_gpr(ctx, rd, result);
     tcg_temp_free(gpr_src_value);
     tcg_temp_free(result);
     return true;
@@ -123,13 +123,14 @@ static inline bool gen_cheri_cap_cap_cap(int cd, int cs1, int cs2,
 
 typedef void(cheri_cap_cap_int_helper)(TCGv_env, TCGv_i32, TCGv_i32, TCGv);
 static inline bool
-gen_cheri_cap_cap_int_plus_imm(int cd, int cs1, int rs2, target_long imm,
+gen_cheri_cap_cap_int_plus_imm(DisasContext *ctx, int cd, int cs1, int rs2,
+                               target_long imm,
                                cheri_cap_cap_int_helper *gen_func)
 {
     TCGv_i32 dest_regnum = tcg_const_i32(cd);
     TCGv_i32 source_regnum = tcg_const_i32(cs1);
     TCGv gpr_value = tcg_temp_new();
-    gen_get_gpr(gpr_value, rs2);
+    gen_get_gpr(ctx, gpr_value, rs2);
     if (imm != 0) {
         tcg_gen_addi_tl(gpr_value, gpr_value, imm);
     }
@@ -140,7 +141,8 @@ gen_cheri_cap_cap_int_plus_imm(int cd, int cs1, int rs2, target_long imm,
     return true;
 }
 #define TRANSLATE_CAP_CAP_INT(name)                                            \
-    DO_TRANSLATE(name, gen_cheri_cap_cap_int_plus_imm, a->rd, a->rs1, a->rs2, 0)
+    DO_TRANSLATE(name, gen_cheri_cap_cap_int_plus_imm, ctx, a->rd, a->rs1,     \
+                 a->rs2, 0)
 
 typedef void(cheri_cap_loadstore_helper)(TCGv_env, TCGv_i32, TCGv, TCGv_i32);
 static inline bool gen_cheri_cap_loadstore(DisasContext *ctx, int srcdst,
@@ -170,7 +172,7 @@ static inline bool gen_cheri_int_cap_cap(DisasContext *ctx, int rd, int cs1,
     TCGv_i32 source_regnum2 = tcg_const_i32(cs2);
     TCGv result = tcg_temp_new();
     gen_func(result, cpu_env, source_regnum1, source_regnum2);
-    gen_set_gpr(rd, result);
+    gen_set_gpr(ctx, rd, result);
     tcg_temp_free(result);
     tcg_temp_free_i32(source_regnum2);
     tcg_temp_free_i32(source_regnum1);
@@ -351,10 +353,10 @@ static bool gen_ddc_load(DisasContext *ctx, int rd, int rs1, MemOp memop)
 {
     TCGv addr = tcg_temp_new();
     TCGv value = tcg_temp_new();
-    gen_get_gpr(addr, rs1);
+    gen_get_gpr(ctx, addr, rs1);
     gen_ddc_interposed_ld_tl(ctx, value, /* Update addr in-place */ NULL, addr,
                              ctx->mem_idx, memop);
-    gen_set_gpr(rd, value);
+    gen_set_gpr(ctx, rd, value);
     tcg_temp_free(addr);
     tcg_temp_free(value);
     return true;
@@ -369,7 +371,7 @@ static inline bool gen_cap_load_mem_idx(DisasContext *ctx, int32_t rd,
     TCGv_cap_checked_ptr vaddr = tcg_temp_new_cap_checked();
     generate_cap_load_check_imm(vaddr, cs, offset, op);
     tcg_gen_qemu_ld_tl_with_checked_addr(value, vaddr, mem_idx, op);
-    gen_set_gpr(rd, value);
+    gen_set_gpr(ctx, rd, value);
     tcg_temp_free_cap_checked(vaddr);
     tcg_temp_free(value);
     return true;
@@ -406,7 +408,7 @@ TRANSLATE_EXPLICIT_LOAD(ld_wu, MO_UL)
 static inline bool trans_ld_c_ddc(DisasContext *ctx, arg_ld_c_ddc *a)
 {
     // always uses DDC as the base register
-    return gen_cheri_cap_int_plus_imm(a->rd, a->rs1, 0,
+    return gen_cheri_cap_int_plus_imm(ctx, a->rd, a->rs1, 0,
                                       &gen_helper_load_cap_via_ddc);
 }
 
@@ -421,7 +423,7 @@ static inline bool trans_lc(DisasContext *ctx, arg_lc *a)
 {
     if (!ctx->capmode) {
         // Without capmode we load relative to DDC (lc instructions)
-        return gen_cheri_cap_int_plus_imm(a->rd, a->rs1, a->imm,
+        return gen_cheri_cap_int_plus_imm(ctx, a->rd, a->rs1, a->imm,
                                           &gen_helper_load_cap_via_ddc);
     }
     return gen_cheri_cap_loadstore(ctx, a->rd, a->rs1, /*offset=*/a->imm,
@@ -433,8 +435,8 @@ static bool gen_ddc_store(DisasContext *ctx, int rs1, int rs2, MemOp memop)
 {
     TCGv addr = tcg_temp_new();
     TCGv value = tcg_temp_new();
-    gen_get_gpr(addr, rs1);
-    gen_get_gpr(value, rs2);
+    gen_get_gpr(ctx, addr, rs1);
+    gen_get_gpr(ctx, value, rs2);
     gen_ddc_interposed_st_tl(ctx, value, /* Update addr in-place */ NULL, addr,
                              ctx->mem_idx, memop);
     tcg_temp_free(value);
@@ -452,7 +454,7 @@ static inline bool gen_cap_store_mem_idx(DisasContext *ctx, int32_t addr_regnum,
     generate_cap_store_check_imm(vaddr, addr_regnum, offset, op);
 
     TCGv value = tcg_temp_new();
-    gen_get_gpr(value, val_regnum);
+    gen_get_gpr(ctx, value, val_regnum);
     tcg_gen_qemu_st_tl_with_checked_addr(value, vaddr, mem_idx, op);
     tcg_temp_free(value);
     tcg_temp_free_cap_checked(vaddr);
@@ -489,7 +491,7 @@ TRANSLATE_EXPLICIT_STORE(st_d, MO_Q)
 static inline bool trans_st_c_ddc(DisasContext *ctx, arg_st_c_ddc *a)
 {
     // always uses DDC as the base register
-    return gen_cheri_cap_int_plus_imm(a->rs2, a->rs1, 0,
+    return gen_cheri_cap_int_plus_imm(ctx, a->rs2, a->rs1, 0,
                                       &gen_helper_store_cap_via_ddc);
 }
 
@@ -505,7 +507,7 @@ static inline bool trans_sc(DisasContext *ctx, arg_sc *a)
     // RS2 is the value, RS1 is the capability
     if (!ctx->capmode) {
         // Without capmode we store relative to DDC (sc instructions)
-        return gen_cheri_cap_int_plus_imm(a->rs2, a->rs1, a->imm,
+        return gen_cheri_cap_int_plus_imm(ctx, a->rs2, a->rs1, a->imm,
                                           &gen_helper_store_cap_via_ddc);
     }
     return gen_cheri_cap_loadstore(ctx, a->rs2, a->rs1, /*offset=*/a->imm,
