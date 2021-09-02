@@ -31,10 +31,9 @@
 #include <fuse.h>
 #include <fuse_lowlevel.h>
 
-#if defined(CONFIG_FALLOCATE_ZERO_RANGE)
-#include <linux/falloc.h>
+#ifdef __linux__
+#include <linux/fs.h>
 #endif
-
 
 /* Prevent overly long bounce buffer allocations */
 #define FUSE_MAX_BOUNCE_BYTES (MIN(BDRV_REQUEST_MAX_BYTES, 64 * 1024 * 1024))
