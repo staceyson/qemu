@@ -1093,15 +1093,24 @@ static void parse_display(const char *p)
          * parse_display_qapi() due to some options not in
          * DisplayOptions, specifically:
          *   - ctrl_grab + alt_grab
-         *     Not clear yet what happens to them long-term.  Should
-         *     replaced by something better or deprecated and dropped.
+         *     They can't be moved into the QAPI since they use underscores,
+         *     thus they will get replaced by "grab-mod" in the long term
          */
 #if defined(CONFIG_SDL)
         dpy.type = DISPLAY_TYPE_SDL;
         while (*opts) {
             const char *nextopt;
 
-            if (strstart(opts, ",alt_grab=", &nextopt)) {
+            if (strstart(opts, ",grab-mod=", &nextopt)) {
+                opts = nextopt;
+                if (strstart(opts, "lshift-lctrl-lalt", &nextopt)) {
+                    alt_grab = 1;
+                } else if (strstart(opts, "rctrl", &nextopt)) {
+                    ctrl_grab = 1;
+                } else {
+                    goto invalid_sdl_args;
+                }
+            } else if (strstart(opts, ",alt_grab=", &nextopt)) {
                 opts = nextopt;
                 if (strstart(opts, "on", &nextopt)) {
                     alt_grab = 1;
@@ -1110,6 +1119,7 @@ static void parse_display(const char *p)
                 } else {
                     goto invalid_sdl_args;
                 }
+                warn_report("alt_grab is deprecated, use grab-mod instead.");
             } else if (strstart(opts, ",ctrl_grab=", &nextopt)) {
                 opts = nextopt;
                 if (strstart(opts, "on", &nextopt)) {
@@ -1119,6 +1129,7 @@ static void parse_display(const char *p)
                 } else {
                     goto invalid_sdl_args;
                 }
+                warn_report("ctrl_grab is deprecated, use grab-mod instead.");
             } else if (strstart(opts, ",window_close=", &nextopt) ||
                        strstart(opts, ",window-close=", &nextopt)) {
                 if (strstart(opts, ",window_close=", NULL)) {
@@ -2993,6 +3004,8 @@ void qemu_init(int argc, char **argv, char **envp)
                 dpy.type = DISPLAY_TYPE_NONE;
                 break;
             case QEMU_OPTION_curses:
+                warn_report("-curses is deprecated, "
+                            "use -display curses instead.");
 #ifdef CONFIG_CURSES
                 dpy.type = DISPLAY_TYPE_CURSES;
 #else
@@ -3351,9 +3364,13 @@ void qemu_init(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_alt_grab:
                 alt_grab = 1;
+                warn_report("-alt-grab is deprecated, please use "
+                            "-display sdl,grab-mod=lshift-lctrl-lalt instead.");
                 break;
             case QEMU_OPTION_ctrl_grab:
                 ctrl_grab = 1;
+                warn_report("-ctrl-grab is deprecated, please use "
+                            "-display sdl,grab-mod=rctrl instead.");
                 break;
             case QEMU_OPTION_no_quit:
                 dpy.has_window_close = true;
@@ -3362,6 +3379,7 @@ void qemu_init(int argc, char **argv, char **envp)
                             "-display ...,window-close=off instead.");
                 break;
             case QEMU_OPTION_sdl:
+                warn_report("-sdl is deprecated, use -display sdl instead.");
 #ifdef CONFIG_SDL
                 dpy.type = DISPLAY_TYPE_SDL;
                 break;
