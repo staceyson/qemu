@@ -190,50 +190,6 @@ void qemu_log_printf_create_globals(void);
 struct cpu_log_entry;
 
 /*
- * Trace event identifiers.
- */
-typedef enum {
-    LOG_EVENT_STATE = 0,
-    LOG_EVENT_CTX_SWITCH = 1,
-} log_event_id_t;
-
-/*
- * Tracing status changed (e.g. trace start/stop)
- */
-typedef enum {
-    LOG_EVENT_STATE_START,
-    LOG_EVENT_STATE_STOP,
-    LOG_EVENT_STATE_FLUSH
-} log_event_trace_state_t;
-
-typedef struct {
-    log_event_trace_state_t next_state;
-    target_ulong pc;
-} log_event_trace_state_update_t;
-
-/*
- * Context switch event.
- */
-typedef struct {
-    target_ulong pid; /* Process ID */
-    target_ulong tid; /* Thread ID */
-    target_ulong cid; /* Compartment ID */
-} log_event_ctx_switch_t;
-
-/*
- * Trace event.
- * This records arbitrary higher-level events associated with instruction
- * entries.
- */
-typedef struct {
-    log_event_id_t id;
-    union {
-        log_event_trace_state_update_t state;
-        log_event_ctx_switch_t ctx_switch;
-    };
-} log_event_t;
-
-/*
  * Request a flush of the TCG when changing loglevel outside of qemu_log_instr.
  * TODO(am2419): this should be removed from the interface.
  */

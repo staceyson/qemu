@@ -22,6 +22,7 @@
 #include "hw/sysbus.h"
 #include "qapi/error.h"
 #include "qemu/log.h"
+#include "qemu/log_instr.h"
 #include "qemu/module.h"
 #include "sysemu/runstate.h"
 #include "hw/hw.h"
@@ -42,6 +43,9 @@ static void sifive_test_write(void *opaque, hwaddr addr,
         case FINISHER_FAIL:
             exit(code);
         case FINISHER_PASS:
+#ifdef CONFIG_TCG_LOG_INSTR
+            qemu_log_instr_sync_buffers();
+#endif
             exit(0);
         case FINISHER_RESET:
             qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);

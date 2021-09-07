@@ -38,14 +38,7 @@
 
 #pragma once
 
-/*
- * Instruction log info associated with each committed log entry.
- * This is stored in the per-cpu log cpustate.
- */
-typedef struct cpu_log_entry {
-#define cpu_log_entry_startzero asid
-    uint16_t asid;
-    int flags;
+/* cpu_log_entry flags */
 /* Entry contains a synchronous exception */
 #define LI_FLAG_INTR_TRAP (1 << 0)
 /* Entry contains an asynchronous exception */
@@ -56,6 +49,24 @@ typedef struct cpu_log_entry {
 /* Entry contains instruction data or just events */
 #define LI_FLAG_HAS_INSTR_DATA (1 << 3)
 
+/* register info flags */
+#define LRI_CAP_REG   1
+#define LRI_HOLDS_CAP 2
+
+/* memory op info flags */
+#define LMI_LD  1
+#define LMI_ST  2
+#define LMI_CAP 4
+
+#ifndef __cplusplus
+/*
+ * Instruction log info associated with each committed log entry.
+ * This is stored in the per-cpu log cpustate.
+ */
+typedef struct cpu_log_entry {
+#define cpu_log_entry_startzero asid
+    uint16_t asid;
+    int flags;
     qemu_log_instr_cpu_mode_t next_cpu_mode;
     uint32_t intr_code;
     target_ulong intr_vector;
@@ -92,11 +103,8 @@ typedef struct cpu_log_entry {
  * Register update info.
  * This records a CPU register update occurred during an instruction.
  */
-typedef struct {
+typedef struct log_reginfo {
     uint16_t flags;
-#define LRI_CAP_REG   1
-#define LRI_HOLDS_CAP 2
-
     const char *name;
     union {
         target_ulong gpr;
@@ -113,11 +121,8 @@ typedef struct {
  * Memory access info.
  * This records a memory access occurred during an instruction.
  */
-typedef struct {
+typedef struct log_meminfo {
     uint8_t flags;
-#define LMI_LD  1
-#define LMI_ST  2
-#define LMI_CAP 4
     MemOp op;
     target_ulong addr;
     union {
@@ -135,9 +140,9 @@ typedef struct {
  */
 struct trace_backend_hooks {
     void (*init)(CPUArchState *env);
+    void (*sync)(CPUArchState *env);
     void (*emit_header)(CPUArchState *env);
     void (*emit_instr)(CPUArchState *env, cpu_log_entry_t *entry);
-    void (*emit_events)(CPUArchState *env, cpu_log_entry_t *entry);
 };
 typedef struct trace_backend_hooks trace_backend_hooks_t;
 
@@ -149,14 +154,13 @@ typedef bool (*cpu_log_instr_filter_fn_t)(struct cpu_log_entry *entry);
 
 /* Text backend */
 void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry);
-void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry);
 /* CVTrace backend */
 void emit_cvtrace_header(CPUArchState *env);
 void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry);
-/* Stats backen */
-void init_stats_backend(CPUArchState *env);
-void emit_stats_entry(CPUArchState *env, cpu_log_entry_t *entry);
-void emit_stats_events(CPUArchState *env, cpu_log_entry_t *entry);
+/* Perfetto backend */
+void init_perfetto_backend(CPUArchState *env);
+void sync_perfetto_backend(CPUArchState *env);
+void emit_perfetto_entry(CPUArchState *env, cpu_log_entry_t *entry);
 
 #ifdef CONFIG_DEBUG_TCG
 #define log_assert(x) assert((x))
@@ -182,3 +186,4 @@ static inline cpu_log_entry_t *get_cpu_log_entry(CPUArchState *env)
     return &g_array_index(cpulog->instr_info, cpu_log_entry_t,
                           cpulog->ring_head);
 }
+#endif /* __cplusplus */

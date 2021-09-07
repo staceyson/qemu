@@ -105,31 +105,22 @@ static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry);
  */
 static trace_backend_hooks_t trace_backends[] = {
     { .init = NULL,
+      .sync = NULL,
       .emit_header = NULL,
-      .emit_instr = emit_text_instr,
-      .emit_events = emit_text_events },
+      .emit_instr = emit_text_instr },
     { .init = NULL,
+      .sync = NULL,
       .emit_header = emit_cvtrace_header,
-      .emit_instr = emit_cvtrace_entry,
-      .emit_events = NULL },
+      .emit_instr = emit_cvtrace_entry },
     { .init = NULL,
+      .sync = NULL,
       .emit_header = NULL,
-      .emit_instr = emit_nop_entry,
-      .emit_events = emit_nop_entry },
-#ifdef CONFIG_TRACE_STATS
-    { .init = init_stats_backend,
-      .emit_header = NULL,
-      .emit_instr = emit_stats_entry,
-      .emit_events = emit_stats_events },
-#endif
+      .emit_instr = emit_nop_entry },
 #ifdef CONFIG_TRACE_PERFETTO
-/* { */
-/*     .init = init_perfetto_backend, */
-/*     .emit_header = NULL, */
-/*     .emit_start = emit_perfetto_start, */
-/*     .emit_stop = emit_perfetto_stop, */
-/*     .emit_entry = emit_perfetto_entry */
-/* } */
+    { .init = init_perfetto_backend,
+      .sync = sync_perfetto_backend,
+      .emit_header = NULL,
+      .emit_instr = emit_perfetto_entry }
 #endif
 };
 
@@ -189,15 +180,6 @@ static void reset_log_buffer(cpu_log_instr_state_t *cpulog,
 }
 
 /* Common instruction commit implementation */
-static void do_instr_emit(CPUArchState *env, cpu_log_entry_t *entry)
-{
-    if (entry->flags & LI_FLAG_HAS_INSTR_DATA) {
-        trace_backend->emit_instr(env, entry);
-    }
-    if (entry->events->len > 0) {
-        trace_backend->emit_events(env, entry);
-    }
-}
 
 static void do_instr_commit(CPUArchState *env)
 {
@@ -230,7 +212,7 @@ static void do_instr_commit(CPUArchState *env)
             cpulog->ring_tail =
                 (cpulog->ring_tail + 1) % cpulog->instr_info->len;
     } else {
-        do_instr_emit(env, entry);
+        trace_backend->emit_instr(env, entry);
     }
 }
 
@@ -464,6 +446,32 @@ void qemu_log_instr_init(CPUState *cpu)
             qemu_log_instr_add_filter(
                 cpu, g_array_index(reset_filters, cpu_log_instr_filter_t, i));
         }
+    }
+}
+
+static void do_log_backend_sync(CPUState *cpu, run_on_cpu_data _unused)
+{
+    log_assert(trace_backend->sync != NULL &&
+               "Missing sync() callback on trace backend");
+    trace_backend->sync(cpu->env_ptr);
+}
+
+/*
+ * Attempt to syncronize buffers in the tracing backend for each CPU.
+ * NOTE: This is a blocking operation that may delay the exit path.
+ */
+void qemu_log_instr_sync_buffers()
+{
+    CPUState *cpu;
+
+    /* Avoid doing this early if there is no sync function */
+    if (trace_backend->sync == NULL) {
+        return;
+    }
+
+    CPU_FOREACH(cpu)
+    {
+        run_on_cpu(cpu, do_log_backend_sync, RUN_ON_CPU_NULL);
     }
 }
 
@@ -1130,7 +1138,7 @@ void qemu_log_instr_flush(CPUArchState *env)
 
     while (curr != cpulog->ring_head) {
         entry = &g_array_index(cpulog->instr_info, cpu_log_entry_t, curr);
-        do_instr_emit(env, entry);
+        trace_backend->emit_instr(env, entry);
         curr = (curr + 1) % cpulog->instr_info->len;
     }
     cpulog->ring_tail = cpulog->ring_head;

@@ -115,81 +115,78 @@ static inline void emit_text_reg(log_reginfo_t *rinfo)
  */
 void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
 {
+    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
     QemuLogFile *logfile;
+    const log_event_t *event;
+    const char *log_state_op;
     int i;
 
-    /* Dump CPU-ID:ASID + address */
-    qemu_log("[%d:%d] ", env_cpu(env)->cpu_index, entry->asid);
+    if (entry->flags & LI_FLAG_HAS_INSTR_DATA) {
+        /* Dump CPU-ID:ASID + address */
+        qemu_log("[%d:%d] ", env_cpu(env)->cpu_index, entry->asid);
 
-    /*
-     * Instruction disassembly, note that we use the instruction info
-     * opcode bytes, without accessing target memory here.
-     */
-    rcu_read_lock();
-    logfile = qatomic_rcu_read(&qemu_logfile);
-    if (logfile) {
-        target_disas_buf(logfile->fd, env_cpu(env), entry->insn_bytes,
-                         sizeof(entry->insn_bytes), entry->pc, 1);
-    }
-    rcu_read_unlock();
-
-    /*
-     * TODO(am2419): what to do with injected instructions?
-     * Is the rvfi_dii_trace state valid at log commit?
-     */
-
-    /* Dump mode switching info */
-    if (entry->flags & LI_FLAG_MODE_SWITCH)
-        qemu_log("-> Switch to %s mode\n",
-                 cpu_get_mode_name(entry->next_cpu_mode));
-    /* Dump interrupt/exception info */
-    switch (entry->flags & LI_FLAG_INTR_MASK) {
-    case LI_FLAG_INTR_TRAP:
-        qemu_log("-> Exception #%u vector 0x" TARGET_FMT_lx
-                 " fault-addr 0x" TARGET_FMT_lx "\n",
-                 entry->intr_code, entry->intr_vector, entry->intr_faultaddr);
-        break;
-    case LI_FLAG_INTR_ASYNC:
-        qemu_log("-> Interrupt #%04x vector 0x" TARGET_FMT_lx "\n",
-                 entry->intr_code, entry->intr_vector);
-        break;
-    default:
-        /* No interrupt */
-        break;
-    }
-
-    /* Dump memory access */
-    for (i = 0; i < entry->mem->len; i++) {
-        log_meminfo_t *minfo = &g_array_index(entry->mem, log_meminfo_t, i);
-        if (minfo->flags & LMI_LD) {
-            emit_text_ldst(minfo, "Read");
-        } else if (minfo->flags & LMI_ST) {
-            emit_text_ldst(minfo, "Write");
+        /*
+         * Instruction disassembly, note that we use the instruction info
+         * opcode bytes, without accessing target memory here.
+         */
+        rcu_read_lock();
+        logfile = qatomic_rcu_read(&qemu_logfile);
+        if (logfile) {
+            target_disas_buf(logfile->fd, env_cpu(env), entry->insn_bytes,
+                             sizeof(entry->insn_bytes), entry->pc, 1);
         }
-    }
+        rcu_read_unlock();
 
-    /* Dump register changes and side-effects */
-    for (i = 0; i < entry->regs->len; i++) {
-        log_reginfo_t *rinfo = &g_array_index(entry->regs, log_reginfo_t, i);
-        emit_text_reg(rinfo);
+        /*
+         * TODO(am2419): what to do with injected instructions?
+         * Is the rvfi_dii_trace state valid at log commit?
+         */
+
+        /* Dump mode switching info */
+        if (entry->flags & LI_FLAG_MODE_SWITCH)
+            qemu_log("-> Switch to %s mode\n",
+                     cpu_get_mode_name(entry->next_cpu_mode));
+        /* Dump interrupt/exception info */
+        switch (entry->flags & LI_FLAG_INTR_MASK) {
+        case LI_FLAG_INTR_TRAP:
+            qemu_log("-> Exception #%u vector 0x" TARGET_FMT_lx
+                     " fault-addr 0x" TARGET_FMT_lx "\n",
+                     entry->intr_code, entry->intr_vector,
+                     entry->intr_faultaddr);
+            break;
+        case LI_FLAG_INTR_ASYNC:
+            qemu_log("-> Interrupt #%04x vector 0x" TARGET_FMT_lx "\n",
+                     entry->intr_code, entry->intr_vector);
+            break;
+        default:
+            /* No interrupt */
+            break;
+        }
+
+        /* Dump memory access */
+        for (i = 0; i < entry->mem->len; i++) {
+            log_meminfo_t *minfo = &g_array_index(entry->mem, log_meminfo_t, i);
+            if (minfo->flags & LMI_LD) {
+                emit_text_ldst(minfo, "Read");
+            } else if (minfo->flags & LMI_ST) {
+                emit_text_ldst(minfo, "Write");
+            }
+        }
+
+        /* Dump register changes and side-effects */
+        for (i = 0; i < entry->regs->len; i++) {
+            log_reginfo_t *rinfo =
+                &g_array_index(entry->regs, log_reginfo_t, i);
+            emit_text_reg(rinfo);
+        }
     }
 
     /* Dump extra logged messages, if any */
     if (entry->txt_buffer->len > 0) {
         qemu_log("%s", entry->txt_buffer->str);
     }
-}
 
-/*
- * Emit a textual representation of events recorded by the given trace entry.
- */
-void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry)
-{
-    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
-    const log_event_t *event;
-    const char *log_state_op;
-    int i;
-
+    /* Emit events recorded by the given trace entry */
     for (i = 0; i < entry->events->len; i++) {
         event = &g_array_index(entry->events, const log_event_t, i);
         switch (event->id) {
@@ -203,20 +200,18 @@ void emit_text_events(CPUArchState *env, cpu_log_entry_t *entry)
             }
 
             if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_USER) {
-                qemu_log("[%u:%u] %s user-mode only instruction logging "
-                         "@ " TARGET_FMT_lx "\n",
-                         env_cpu(env)->cpu_index, cpu_get_asid(env),
-                         log_state_op, event->state.pc);
+                qemu_log(
+                    "[%u:%u] %s user-mode only instruction logging @ %lx\n",
+                    env_cpu(env)->cpu_index, cpu_get_asid(env), log_state_op,
+                    event->state.pc);
             } else {
-                qemu_log("[%u:%u] %s instruction logging @ " TARGET_FMT_lx
-                         "\n",
+                qemu_log("[%u:%u] %s instruction logging @ %lx\n",
                          env_cpu(env)->cpu_index, cpu_get_asid(env),
                          log_state_op, event->state.pc);
             }
             break;
         case LOG_EVENT_CTX_SWITCH:
-            qemu_log("Context switch pid=0x" TARGET_FMT_lx
-                     " tid=0x" TARGET_FMT_lx " cid=0x" TARGET_FMT_lx "\n",
+            qemu_log("Context switch pid=0x%lx tid=0x%lx cid=0x%lx\n",
                      event->ctx_switch.pid, event->ctx_switch.tid,
                      event->ctx_switch.cid);
         }

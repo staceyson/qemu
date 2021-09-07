@@ -3458,15 +3458,23 @@ void qemu_init(int argc, char **argv, char **envp)
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_TEXT);
                 } else if (strcmp(optarg, "cvtrace") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_CVTRACE);
-#ifdef CONFIG_TRACE_STATS
-                } else if (strcmp(optarg, "stats") == 0) {
-                    qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_STATS);
+#ifdef CONFIG_TRACE_PERFETTO
+                } else if (strcmp(optarg, "perfetto") == 0) {
+                    qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_PERFETTO);
 #endif
                 } else {
                     printf("Invalid choice for cheri-trace-format: '%s'\n", optarg);
                     exit(1);
                 }
                 break;
+#ifdef CONFIG_TRACE_PERFETTO
+            case QEMU_OPTION_trace_perfetto_logfile:
+                qemu_log_instr_perfetto_conf_logfile(optarg);
+                break;
+            case QEMU_OPTION_trace_perfetto_categories:
+                qemu_log_instr_perfetto_conf_categories(optarg);
+                break;
+#endif
             case QEMU_OPTION_cheri_trace_buffer_size:
                 qemu_log_instr_set_buffer_size(strtoul(optarg, NULL, 0));
                 break;

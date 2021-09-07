@@ -4213,10 +4213,25 @@ SRST
 ERST
 
 DEF("cheri-trace-backend", HAS_ARG, QEMU_OPTION_cheri_trace_backend, \
-"-cheri-trace-backend [text|cvtrace|stats]     Select CHERI trace mode.\n", QEMU_ARCH_ALL)
+"-cheri-trace-backend [text|cvtrace|perfetto]     Select CHERI trace mode.\n", QEMU_ARCH_ALL)
 SRST
 ``-cheri-trace-backend type``
-    Set CHERI trace backend to <type> (text, cvtrace or stats)
+    Set CHERI trace backend to <type> (text, cvtrace or perfetto)
+ERST
+
+DEF("cheri-trace-perfetto-logfile", HAS_ARG, QEMU_OPTION_trace_perfetto_logfile, \
+"-cheri-trace-perfetto-logfile [logfile]     \
+ Set log file for perfetto traces, defaults to qemu_trace.pb.\n", QEMU_ARCH_ALL)
+SRST
+``-cheri-trace-perfetto-logfile [logfile]``
+    Set perfetto trace output file.
+ERST
+
+DEF("cheri-trace-perfetto-categories", HAS_ARG, QEMU_OPTION_trace_perfetto_categories, \
+"-cheri-trace-perfetto-categories category[,...]     Select categories to trace.\n", QEMU_ARCH_ALL)
+SRST
+``-cheri-trace-perfetto-categories category[,...]``
+    Select categories of messages to include in the trace (instructions, stats)
 ERST
 
 DEF("cheri-trace-filters", HAS_ARG, QEMU_OPTION_cheri_trace_filters, \

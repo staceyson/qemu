@@ -26,33 +26,41 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
+/*
+ * Internal instruction logging metric aggregation
+ */
+
 #pragma once
 
-#include <stdint.h>
-#include <stdbool.h>
+#include <map>
+#include <perfetto.h>
+#include <boost/icl/interval_map.hpp>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace cheri
+{
+class qemu_stats
+{
+    /*
+     * Histogram of basic-block hit during tracing.
+     */
+    boost::icl::interval_map<uint64_t, uint64_t> bb_hit_map;
+    /*
+     * Histogram of branch instruction addresses.
+     * Post-processing must be used to distinguish between function
+     * calls and conditional branches.
+     */
+    std::map<uint64_t, uint64_t> branch_map;
+    /*
+     *  PC-tracking info to detect branches.
+     */
+    uint64_t last_pc;
+    uint64_t pc_range_start;
 
-#ifdef CONFIG_TRACE_STATS
-struct qemu_cpu_stats;
-typedef struct qemu_cpu_stats *qemu_cpu_stats_t;
+  public:
+    qemu_stats() : last_pc(0), pc_range_start(0) {}
+    void process_next_pc(uint64_t pc, int insn_size);
+    void flush(perfetto::Track &track);
+    void clear();
+};
 
-/*
- * Interface to manipulate an interval histogram representing a count
- * over address ranges.
- * The pointer returned is an opaque handle.
- */
-qemu_cpu_stats_t qemu_cpu_stats_create(int cpu_id);
-void qemu_cpu_stats_destroy(qemu_cpu_stats_t handle);
-void qemu_cpu_stats_dump(qemu_cpu_stats_t handle, int fd, bool csv_header);
-void qemu_cpu_stats_record_bb_hit(qemu_cpu_stats_t handle, uint64_t start,
-                                  uint64_t end);
-void qemu_cpu_stats_record_call(qemu_cpu_stats_t handle, uint64_t addr,
-                                uint64_t link);
-
-#endif /* CONFIG_TRACE_STATS */
-#ifdef __cplusplus
-}
-#endif
+} // namespace cheri

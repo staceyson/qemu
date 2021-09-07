@@ -54,11 +54,8 @@ typedef enum {
     QEMU_LOG_INSTR_BACKEND_TEXT = 0,
     QEMU_LOG_INSTR_BACKEND_CVTRACE = 1,
     QEMU_LOG_INSTR_BACKEND_NOP = 2,
-#ifdef CONFIG_TRACE_STATS
-    QEMU_LOG_INSTR_BACKEND_STATS = 3,
-#endif
 #ifdef CONFIG_TRACE_PERFETTO
-    QEMU_LOG_INSTR_BACKEND_PERFETTO = 4
+    QEMU_LOG_INSTR_BACKEND_PERFETTO = 3
 #endif
 } qemu_log_instr_backend_t;
 
@@ -93,6 +90,65 @@ typedef enum {
     /* Only log when running in user-mode */
     QEMU_LOG_INSTR_LOGLEVEL_USER = 2,
 } qemu_log_instr_loglevel_t;
+
+/*
+ * Trace event identifiers.
+ */
+typedef enum {
+    LOG_EVENT_STATE = 0,
+    LOG_EVENT_CTX_SWITCH = 1,
+} log_event_id_t;
+
+/*
+ * Tracing status changed (e.g. trace start/stop)
+ */
+typedef enum {
+    LOG_EVENT_STATE_START,
+    LOG_EVENT_STATE_STOP,
+    LOG_EVENT_STATE_FLUSH
+} log_event_trace_state_t;
+
+typedef struct {
+    log_event_trace_state_t next_state;
+    uint64_t pc;
+} log_event_trace_state_update_t;
+
+/*
+ * Context switch event.
+ */
+typedef struct {
+    uint64_t pid; /* Process ID */
+    uint64_t tid; /* Thread ID */
+    uint64_t cid; /* Compartment ID */
+} log_event_ctx_switch_t;
+
+/*
+ * Trace event.
+ * This records arbitrary higher-level events associated with instruction
+ * entries.
+ */
+typedef struct {
+    log_event_id_t id;
+    union {
+        log_event_trace_state_update_t state;
+        log_event_ctx_switch_t ctx_switch;
+    };
+} log_event_t;
+
+#ifdef CONFIG_TRACE_PERFETTO
+/* Perfetto backend configuration hooks */
+#ifdef __cplusplus
+extern "C" {
+#endif
+void qemu_log_instr_perfetto_conf_logfile(const char *name);
+int qemu_log_instr_perfetto_conf_categories(const char *category_list);
+#ifdef __cplusplus
+}
+#endif
+#endif /* CONFIG_TRACE_PERFETTO */
+
+#ifndef __cplusplus
+/* No visibility in the perfetto tracing backend */
 
 static inline void qemu_log_instr_set_backend(qemu_log_instr_backend_t id)
 {
@@ -174,8 +230,17 @@ typedef enum {
 /*
  * Initialize instruction logging for a cpu.
  */
-void qemu_log_instr_init(CPUState *cpu);
-int qemu_log_instr_global_switch(int log_flags);
+void qemu_log_instr_init(CPUState *env);
+
+/*
+ * Hook to make sure all tracing buffers are synced on qemu shutdown.
+ */
+void qemu_log_instr_sync_buffers(void);
+
+/*
+ * Global instruction logging hook from qemu tracing commands.
+ */
+void qemu_log_instr_global_switch(bool request_stop);
 
 /*
  * Update the ring buffer size.
@@ -205,6 +270,7 @@ void qemu_log_instr_add_startup_filter(cpu_log_instr_filter_t filter);
  * memory ranges..
  */
 void qemu_log_instr_mem_filter_update(void);
+#endif /* ! __cplusplus */
 
 #else /* ! CONFIG_TCG_LOG_INSTR */
 #define qemu_log_instr_set_backend(id) ((void)0)

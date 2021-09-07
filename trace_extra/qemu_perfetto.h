@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-bool perfetto_init(void);
+bool perfetto_init(int cpu_id, void **backend_data);
 
 #ifdef __cplusplus
 } /* extern C */

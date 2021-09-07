@@ -26,116 +26,72 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
-#include "exec/log_instr_stats.h"
-
-#include <map>
-#include <iostream>
 #include <utility>
-#include <boost/iostreams/stream.hpp>
-#include <boost/iostreams/device/file_descriptor.hpp>
-#include <boost/icl/interval_map.hpp>
+#include <cstdint>
+#include "qemu/log_instr.h"
+#include "exec/log_instr_perfetto.h"
+#include "trace_extra/trace_stats.hh"
 
 namespace icl = boost::icl;
-namespace io = boost::iostreams;
 
-using addr_range_imap = icl::interval_map<uint64_t, uint64_t>;
 using addr_range = icl::interval<uint64_t>;
 
-namespace
+namespace cheri
 {
 
-addr_range::interval_type make_addr_range(uint64_t start, uint64_t end)
+void qemu_stats::flush(perfetto::Track &track)
 {
-    return addr_range::right_open(start, end);
+    /*
+     * XXX-AM: Note: to avoid big packets we should probably write
+     * the histogram samples separate from the hisogram descriptor and
+     * tie them toghether in post-processing.
+     * This would likely require specialized packet processing.
+     */
+    TRACE_EVENT_INSTANT("stats", "bb_hist", track,
+                        [&](perfetto::EventContext ctx) {
+                            auto *qemu_arg = ctx.event()->set_qemu();
+                            auto *hist = qemu_arg->set_histogram();
+                            for (const auto &keyval : bb_hit_map) {
+                                auto &range = keyval.first;
+                                auto *bucket = hist->add_bucket();
+                                bucket->set_start(range.lower());
+                                bucket->set_end(range.upper());
+                                bucket->set_value(keyval.second);
+                            }
+                        });
+
+    TRACE_EVENT_INSTANT("stats", "branch_hist", track,
+                        [&](perfetto::EventContext ctx) {
+                            auto *qemu_arg = ctx.event()->set_qemu();
+                            auto *hist = qemu_arg->set_histogram();
+                            for (const auto &keyval : branch_map) {
+                                auto *bucket = hist->add_bucket();
+                                bucket->set_start(keyval.first);
+                                bucket->set_value(keyval.second);
+                            }
+                        });
+    clear();
 }
 
-struct QEMUStats {
-    addr_range_imap call_map;
-    addr_range_imap bb_hit_map;
-    int cpu_id;
-
-    QEMUStats(int cpu_id) : cpu_id(cpu_id) {}
-
-    void record_bb_hit(uint64_t start, uint64_t end);
-    void record_call(uint64_t addr, uint64_t link);
-    void dump(int fd, bool csv_header);
-    void clear();
-};
-
-QEMUStats &handle2stats(qemu_cpu_stats_t handle)
-{
-    return *reinterpret_cast<QEMUStats *>(handle);
-}
-
-void QEMUStats::dump(int fd, bool csv_header)
-{
-    io::file_descriptor_sink fd_sink(fd, io::never_close_handle);
-    io::stream<io::file_descriptor_sink> ostream(fd_sink);
-
-    if (csv_header)
-        ostream << "CPU,start,end,count" << std::endl;
-    for (const auto &keyval : bb_hit_map) {
-        auto &range = keyval.first;
-        ostream << cpu_id << "," << std::hex << range.lower() << ","
-                << range.upper() << "," << std::dec << keyval.second
-                << std::endl;
-    }
-}
-
-void QEMUStats::clear()
+void qemu_stats::clear()
 {
     bb_hit_map.clear();
-    call_map.clear();
+    branch_map.clear();
 }
 
-void QEMUStats::record_bb_hit(uint64_t start, uint64_t end)
+void qemu_stats::process_next_pc(uint64_t pc, int insn_size)
 {
-    bb_hit_map += std::make_pair(make_addr_range(start, end), 1UL);
+    if (pc == 0) {
+        pc_range_start = pc;
+        last_pc = pc;
+    } else if (pc - last_pc > insn_size) {
+        // presume we are branching
+        bb_hit_map += std::make_pair(
+            addr_range::right_open(pc_range_start, last_pc), 1UL);
+        pc_range_start = pc;
+        branch_map[pc] += 1;
+    }
+    last_pc = pc;
 }
 
-void QEMUStats::record_call(uint64_t addr, uint64_t link)
-{
-    call_map += std::make_pair(make_addr_range(addr, link), 1UL);
-}
-
-} // namespace
-
-/*
- * C API wrappers to the stats class.
- */
-extern "C" {
-
-qemu_cpu_stats_t qemu_cpu_stats_create(int cpu_id)
-{
-    auto *stats = new QEMUStats(cpu_id);
-    return reinterpret_cast<qemu_cpu_stats_t>(stats);
-}
-
-void qemu_cpu_stats_destroy(qemu_cpu_stats_t handle)
-{
-    auto stats = &handle2stats(handle);
-    delete stats;
-}
-
-void qemu_cpu_stats_dump(qemu_cpu_stats_t handle, int fd, bool csv_header)
-{
-    auto stats = handle2stats(handle);
-    stats.dump(fd, csv_header);
-    stats.clear();
-}
-
-void qemu_cpu_stats_record_bb_hit(qemu_cpu_stats_t handle, uint64_t start,
-                                  uint64_t end)
-{
-    auto stats = handle2stats(handle);
-    stats.record_bb_hit(start, end);
-}
-
-void qemu_cpu_stats_record_call(qemu_cpu_stats_t handle, uint64_t addr,
-                                uint64_t link)
-{
-    auto stats = handle2stats(handle);
-    stats.record_call(addr, link);
-}
-
-} /* C */
+} // namespace cheri
