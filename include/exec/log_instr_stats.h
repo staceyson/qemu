@@ -36,21 +36,21 @@ extern "C" {
 #endif
 
 #ifdef CONFIG_TRACE_STATS
-struct addr_range_hist;
-typedef struct addr_range_hist *addr_range_hist_t;
+struct qemu_cpu_stats;
+typedef struct qemu_cpu_stats *qemu_cpu_stats_t;
 
 /*
  * Interface to manipulate an interval histogram representing a count
  * over address ranges.
  * The pointer returned is an opaque handle.
  */
-addr_range_hist_t qemu_stats_addr_range_hist_create(void);
-void qemu_stats_addr_range_hist_destroy(addr_range_hist_t handle);
-void qemu_stats_addr_range_hist_insert(addr_range_hist_t handle, uint64_t start,
-                                       uint64_t end, uint64_t value);
-void qemu_stats_addr_range_hist_dump(addr_range_hist_t handle, int fd,
-                                     int cpu_id, bool csv_header);
-void qemu_stats_addr_range_hist_clear(addr_range_hist_t handle);
+qemu_cpu_stats_t qemu_cpu_stats_create(int cpu_id);
+void qemu_cpu_stats_destroy(qemu_cpu_stats_t handle);
+void qemu_cpu_stats_dump(qemu_cpu_stats_t handle, int fd, bool csv_header);
+void qemu_cpu_stats_record_bb_hit(qemu_cpu_stats_t handle, uint64_t start,
+                                  uint64_t end);
+void qemu_cpu_stats_record_call(qemu_cpu_stats_t handle, uint64_t addr,
+                                uint64_t link);
 
 #endif /* CONFIG_TRACE_STATS */
 #ifdef __cplusplus

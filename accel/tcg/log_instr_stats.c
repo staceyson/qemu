@@ -43,7 +43,7 @@
 #include "exec/log_instr_stats.h"
 
 struct cpu_stats {
-    addr_range_hist_t pc_hist;
+    qemu_cpu_stats_t qstats;
     target_ulong last_pc;
     target_ulong pc_range_start;
 };
@@ -63,7 +63,7 @@ void init_stats_backend(CPUArchState *env)
     struct cpu_stats *stats;
 
     stats = malloc(sizeof(struct cpu_stats));
-    stats->pc_hist = qemu_stats_addr_range_hist_create();
+    stats->qstats = qemu_cpu_stats_create(env_cpu(env)->cpu_index);
     stats->last_pc = 0;
     stats->pc_range_start = 0;
     cpulog->backend_data = stats;
@@ -92,13 +92,11 @@ void emit_stats_events(CPUArchState *env, cpu_log_entry_t *entry)
                     if (ftell(logfile->fd) == 0) {
                         header = true;
                     }
-                    qemu_stats_addr_range_hist_dump(
-                        stats->pc_hist, fileno(logfile->fd),
-                        env_cpu(env)->cpu_index, header);
+                    qemu_cpu_stats_dump(stats->qstats, fileno(logfile->fd),
+                                        header);
                     fflush(logfile->fd);
                 }
                 rcu_read_unlock();
-                qemu_stats_addr_range_hist_clear(stats->pc_hist);
                 break;
             }
         }
@@ -116,8 +114,8 @@ void emit_stats_entry(CPUArchState *env, cpu_log_entry_t *entry)
     log_assert(stats != NULL && "Missing stats backend data");
 
     if (entry->pc - stats->last_pc > entry->insn_size) {
-        qemu_stats_addr_range_hist_insert(stats->pc_hist, stats->pc_range_start,
-                                          stats->last_pc, 1);
+        qemu_cpu_stats_record_bb_hit(stats->qstats, stats->pc_range_start,
+                                     stats->last_pc);
         stats->pc_range_start = entry->pc;
     }
     stats->last_pc = entry->pc;

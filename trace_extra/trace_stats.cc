@@ -28,6 +28,7 @@
 
 #include "exec/log_instr_stats.h"
 
+#include <map>
 #include <iostream>
 #include <utility>
 #include <boost/iostreams/stream.hpp>
@@ -48,44 +49,32 @@ addr_range::interval_type make_addr_range(uint64_t start, uint64_t end)
     return addr_range::right_open(start, end);
 }
 
-addr_range_imap &handle2imap(addr_range_hist_t handle)
+struct QEMUStats {
+    addr_range_imap call_map;
+    addr_range_imap bb_hit_map;
+    int cpu_id;
+
+    QEMUStats(int cpu_id) : cpu_id(cpu_id) {}
+
+    void record_bb_hit(uint64_t start, uint64_t end);
+    void record_call(uint64_t addr, uint64_t link);
+    void dump(int fd, bool csv_header);
+    void clear();
+};
+
+QEMUStats &handle2stats(qemu_cpu_stats_t handle)
 {
-    return *reinterpret_cast<addr_range_imap *>(handle);
+    return *reinterpret_cast<QEMUStats *>(handle);
 }
 
-} // namespace
-
-extern "C" {
-
-addr_range_hist_t qemu_stats_addr_range_hist_create()
+void QEMUStats::dump(int fd, bool csv_header)
 {
-    auto hist = new addr_range_imap();
-    return reinterpret_cast<addr_range_hist_t>(hist);
-}
-
-void qemu_stats_addr_range_hist_destroy(addr_range_hist_t handle)
-{
-    auto hist = &handle2imap(handle);
-    delete hist;
-}
-
-void qemu_stats_addr_range_hist_insert(addr_range_hist_t handle, uint64_t start,
-                                       uint64_t end, uint64_t value)
-{
-    auto &hist = handle2imap(handle);
-    hist += std::make_pair(make_addr_range(start, end), value);
-}
-
-void qemu_stats_addr_range_hist_dump(addr_range_hist_t handle, int fd,
-                                     int cpu_id, bool csv_header)
-{
-    auto &hist = handle2imap(handle);
     io::file_descriptor_sink fd_sink(fd, io::never_close_handle);
     io::stream<io::file_descriptor_sink> ostream(fd_sink);
 
     if (csv_header)
         ostream << "CPU,start,end,count" << std::endl;
-    for (const auto &keyval : hist) {
+    for (const auto &keyval : bb_hit_map) {
         auto &range = keyval.first;
         ostream << cpu_id << "," << std::hex << range.lower() << ","
                 << range.upper() << "," << std::dec << keyval.second
@@ -93,10 +82,60 @@ void qemu_stats_addr_range_hist_dump(addr_range_hist_t handle, int fd,
     }
 }
 
-void qemu_stats_addr_range_hist_clear(addr_range_hist_t handle)
+void QEMUStats::clear()
 {
-    auto &hist = handle2imap(handle);
-    hist.clear();
+    bb_hit_map.clear();
+    call_map.clear();
+}
+
+void QEMUStats::record_bb_hit(uint64_t start, uint64_t end)
+{
+    bb_hit_map += std::make_pair(make_addr_range(start, end), 1UL);
+}
+
+void QEMUStats::record_call(uint64_t addr, uint64_t link)
+{
+    call_map += std::make_pair(make_addr_range(addr, link), 1UL);
+}
+
+} // namespace
+
+/*
+ * C API wrappers to the stats class.
+ */
+extern "C" {
+
+qemu_cpu_stats_t qemu_cpu_stats_create(int cpu_id)
+{
+    auto *stats = new QEMUStats(cpu_id);
+    return reinterpret_cast<qemu_cpu_stats_t>(stats);
+}
+
+void qemu_cpu_stats_destroy(qemu_cpu_stats_t handle)
+{
+    auto stats = &handle2stats(handle);
+    delete stats;
+}
+
+void qemu_cpu_stats_dump(qemu_cpu_stats_t handle, int fd, bool csv_header)
+{
+    auto stats = handle2stats(handle);
+    stats.dump(fd, csv_header);
+    stats.clear();
+}
+
+void qemu_cpu_stats_record_bb_hit(qemu_cpu_stats_t handle, uint64_t start,
+                                  uint64_t end)
+{
+    auto stats = handle2stats(handle);
+    stats.record_bb_hit(start, end);
+}
+
+void qemu_cpu_stats_record_call(qemu_cpu_stats_t handle, uint64_t addr,
+                                uint64_t link)
+{
+    auto stats = handle2stats(handle);
+    stats.record_call(addr, link);
 }
 
 } /* C */
