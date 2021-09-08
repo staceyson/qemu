@@ -136,7 +136,7 @@ void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry)
                 cr = null_capability(&intcap);
             }
             uint64_t metadata = (((uint64_t)cr->cr_tag << 63) |
-                                 ((uint64_t)cap_get_otype(cr) << 32) |
+                                 ((uint64_t)cap_get_otype_unsigned(cr) << 32) |
                                  ((uint64_t)COMBINED_PERMS_VALUE(cr) << 1) |
                                  (uint64_t)(cap_is_unsealed(cr) ? 0 : 1));
 
