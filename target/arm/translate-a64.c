@@ -15550,7 +15550,6 @@ static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
         }
     }
 
-    // Top 4 bits of op0
     switch (extract32(insn, 25, 4)) {
     case 0x1: /* Morello Instructions */
 #ifdef TARGET_CHERI
@@ -15559,8 +15558,7 @@ static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
         }
         break;
 #endif
-    case 0x0:
-    case 0x3: /* UNALLOCATED */
+    case 0x0: case 0x3: /* UNALLOCATED */
         unallocated_encoding(s);
         break;
     case 0x2:

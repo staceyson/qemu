@@ -3772,7 +3772,7 @@ FIELD(TBFLAG_CHERI, SCTLRSA, 11, 1)
 #define TBFLAG_CHERI_SIZE TBFLAG_END(TBFLAG_CHERI_SCTLRSA)
 _Static_assert(TBFLAG_CHERI_SIZE <= 32, "");
 
-#endif
+#endif /* TARGET_CHERI */
 
 /*
  * Bit usage when in AArch32 state, both A- and M-profile.
