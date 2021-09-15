@@ -17002,11 +17002,11 @@ static void mips_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
         return;
 #else
         gen_mips_log_instr_unsupported(ctx, "nanomips");
-        ctx->opcode = translator_lduw(env, ctx->base.pc_next);
+        ctx->opcode = translator_lduw(env, &ctx->base, ctx->base.pc_next);
         insn_bytes = decode_isa_nanomips(env, ctx);
 #endif
     } else if (!(ctx->hflags & MIPS_HFLAG_M16)) {
-        ctx->opcode = translator_ldl(env, ctx->base.pc_next);
+        ctx->opcode = translator_ldl(env, &ctx->base, ctx->base.pc_next);
         insn_bytes = 4;
         gen_mips_log_instr32(ctx);
         decode_opc(env, ctx);
@@ -17017,7 +17017,7 @@ static void mips_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
         return;
 #else
         gen_mips_log_instr_unsupported(ctx, "micromips");
-        ctx->opcode = translator_lduw(env, ctx->base.pc_next);
+        ctx->opcode = translator_lduw(env, &ctx->base, ctx->base.pc_next);
         insn_bytes = decode_isa_micromips(env, ctx);
 #endif
     } else if (ctx->insn_flags & ASE_MIPS16) {
@@ -17027,7 +17027,7 @@ static void mips_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
         return;
 #else
         gen_mips_log_instr_unsupported(ctx, "mips16");
-        ctx->opcode = translator_lduw(env, ctx->base.pc_next);
+        ctx->opcode = translator_lduw(env, &ctx->base, ctx->base.pc_next);
         insn_bytes = decode_ase_mips16e(env, ctx);
 #endif
     } else {

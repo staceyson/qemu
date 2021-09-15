@@ -774,18 +774,8 @@ static bool trans_c_hint(DisasContext *ctx, arg_c_hint *a)
     return true;
 }
 
-static void decode_opc(CPURISCVState *env, DisasContext *ctx)
+static void decode_opc(CPURISCVState *env, DisasContext *ctx, uint16_t opcode)
 {
-#ifdef CONFIG_RVFI_DII
-    // We have to avoid memory accesses for injected instructions since
-    // the PC could point somewhere invalid.
-    uint16_t opcode = env->rvfi_dii_have_injected_insn
-                          ? env->rvfi_dii_injected_insn
-                          : translator_lduw(env, ctx->base.pc_next);
-    gen_rvfi_dii_set_field_const_i64(PC, pc_rdata, ctx->base.pc_next);
-#else
-    uint16_t opcode = translator_lduw(env, ctx->base.pc_next);
-#endif
     /* check for compressed insn */
     if (extract16(opcode, 0, 2) != 3) {
         gen_riscv_log_instr16(ctx, opcode);
@@ -805,9 +795,11 @@ static void decode_opc(CPURISCVState *env, DisasContext *ctx)
         // the PC could point somewhere invalid.
         uint16_t next_16 = env->rvfi_dii_have_injected_insn
                           ? (env->rvfi_dii_injected_insn >> 16)
-                          : translator_lduw(env, ctx->base.pc_next + 2);
+                          : translator_lduw(env, &ctx->base,
+                                            ctx->base.pc_next + 2);
 #else
-        uint16_t next_16 = translator_lduw(env, ctx->base.pc_next + 2);
+        uint16_t next_16 = translator_lduw(env, &ctx->base,
+                                           ctx->base.pc_next + 2);
 #endif
         uint32_t opcode32 = opcode;
         opcode32 = deposit32(opcode32, 16, 16, next_16);
@@ -878,8 +870,18 @@ static void riscv_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
 {
     DisasContext *ctx = container_of(dcbase, DisasContext, base);
     CPURISCVState *env = cpu->env_ptr;
+#ifdef CONFIG_RVFI_DII
+    // We have to avoid memory accesses for injected instructions since
+    // the PC could point somewhere invalid.
+    uint16_t opcode16 = env->rvfi_dii_have_injected_insn
+        ? env->rvfi_dii_injected_insn
+        : translator_lduw(env, &ctx->base, ctx->base.pc_next);
+    gen_rvfi_dii_set_field_const_i64(PC, pc_rdata, ctx->base.pc_next);
+#else
+    uint16_t opcode16 = translator_lduw(env, &ctx->base, ctx->base.pc_next);
+#endif
 
-    decode_opc(env, ctx);
+    decode_opc(env, ctx, opcode16);
     ctx->base.pc_next = ctx->pc_succ_insn;
     ctx->w = false;
     gen_rvfi_dii_set_field_const_i64(PC, pc_wdata, ctx->base.pc_next);
