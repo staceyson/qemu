@@ -194,8 +194,9 @@ process_extra_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
         if (evt->id == LOG_EVENT_STATE) {
             switch(evt->state.next_state) {
                 case LOG_EVENT_STATE_FLUSH:
+                    // XXX-AM: Emitting stats and TrackEvent flush should be two separate events TBH.
                     data->stats.flush(data->cpu_track);
-                    //perfetto::TrackEvent::Flush();
+                    perfetto::TrackEvent::Flush();
                     break;
                 case LOG_EVENT_STATE_START:
                     TRACE_EVENT_BEGIN("ctrl", "tracing", data->cpu_ctrl_track);
