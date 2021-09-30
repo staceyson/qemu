@@ -2639,6 +2639,7 @@ if config_all.has_key('CONFIG_TCG')
   endif
   summary_info += {'TCG debug enabled': config_host.has_key('CONFIG_DEBUG_TCG')}
   summary_info += {'TCG instruction logging': config_host.has_key('CONFIG_TCG_LOG_INSTR')}
+  summary_info += {'TCG instruction logging with google-perfetto': config_host.has_key('CONFIG_TRACE_PERFETTO')}
 endif
 summary_info += {'target list':       ' '.join(target_dirs)}
 if have_system
