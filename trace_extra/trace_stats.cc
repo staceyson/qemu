@@ -29,7 +29,6 @@
 #include <utility>
 #include <cstdint>
 #include "qemu/log_instr.h"
-#include "exec/log_instr_perfetto.h"
 #include "trace_extra/trace_stats.hh"
 
 namespace icl = boost::icl;
@@ -70,7 +69,23 @@ void qemu_stats::flush(perfetto::Track &track)
                                 bucket->set_value(keyval.second);
                             }
                         });
+
     clear();
+}
+
+void qemu_stats::pause(uint64_t pc)
+{
+    /*
+     * XXX should we treat this as the end of the block? otherwise the
+     * current PC slice will be lost.
+     */
+    pc_range_start = last_pc = 0;
+}
+
+void qemu_stats::unpause(uint64_t pc)
+{
+    /* Reset the pc-tracking state */
+    pc_range_start = last_pc = pc;
 }
 
 void qemu_stats::clear()
@@ -79,12 +94,16 @@ void qemu_stats::clear()
     branch_map.clear();
 }
 
-void qemu_stats::process_next_pc(uint64_t pc, int insn_size)
+void qemu_stats::process_instr(perfetto::Track &ctx_track,
+                               cpu_log_entry_handle entry)
 {
+    uint64_t pc = perfetto_log_entry_pc(entry);
+    int size = perfetto_log_entry_insn_size(entry);
+
     if (pc == 0) {
         pc_range_start = pc;
         last_pc = pc;
-    } else if (pc - last_pc > insn_size) {
+    } else if (pc - last_pc > size) {
         // presume we are branching
         bb_hit_map += std::make_pair(
             addr_range::right_open(pc_range_start, last_pc), 1UL);

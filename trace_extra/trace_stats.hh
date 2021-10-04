@@ -35,6 +35,7 @@
 #include <map>
 #include <perfetto.h>
 #include <boost/icl/interval_map.hpp>
+#include "exec/log_instr_perfetto.h"
 
 namespace cheri
 {
@@ -58,7 +59,9 @@ class qemu_stats
 
   public:
     qemu_stats() : last_pc(0), pc_range_start(0) {}
-    void process_next_pc(uint64_t pc, int insn_size);
+    void process_instr(perfetto::Track &track, cpu_log_entry_handle entry);
+    void pause(uint64_t pc);
+    void unpause(uint64_t pc);
     void flush(perfetto::Track &track);
     void clear();
 };

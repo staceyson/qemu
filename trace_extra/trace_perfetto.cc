@@ -33,7 +33,7 @@
 /*
  * QEMU instruction logging bridge to the perfetto framework.
  */
-
+#include <cassert>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -136,7 +136,7 @@ bool perfetto_start_tracing(void)
     ds_cfg->set_track_event_config_raw(track_cfg.SerializeAsString());
     auto *producer_cfg = cfg.add_producers();
     producer_cfg->set_producer_name("qemu-tcg");
-    producer_cfg->set_shm_size_kb(1 << 11); // 2MiB
+    producer_cfg->set_shm_size_kb(1 << 11); // 2MiB XXX need more space
 
     session = perfetto::Tracing::NewTrace();
 
@@ -181,13 +181,8 @@ trace_cap_register(perfetto::protos::pbzero::Capability *cap,
 }
 
 void
-process_extra_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
+process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
 {
-    /* Track executed instruction PC to track histograms */
-    uint64_t pc = perfetto_log_entry_pc(entry);
-    int size = perfetto_log_entry_insn_size(entry);
-    data->stats.process_next_pc(pc, size);
-
     int nevents = perfetto_log_entry_events(entry);
     for (int i = 0; i < nevents; i++) {
         log_event_t *evt = perfetto_log_event(entry, i);
@@ -195,18 +190,130 @@ process_extra_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
             switch(evt->state.next_state) {
                 case LOG_EVENT_STATE_FLUSH:
                     // XXX-AM: Emitting stats and TrackEvent flush should be two separate events TBH.
+                    TRACE_EVENT_INSTANT("ctrl", "flush", data->cpu_ctrl_track);
                     data->stats.flush(data->cpu_track);
                     perfetto::TrackEvent::Flush();
                     break;
                 case LOG_EVENT_STATE_START:
+                    data->stats.unpause(entry);
                     TRACE_EVENT_BEGIN("ctrl", "tracing", data->cpu_ctrl_track);
                     break;
                 case LOG_EVENT_STATE_STOP:
+                    data->stats.pause(entry);
                     TRACE_EVENT_END("ctrl", data->cpu_ctrl_track);
                     break;
             }
         }
     }
+}
+
+void
+process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
+{
+    /*
+     * If we have instruction data, we assume that tracing is enabled and run extra
+     * stats gathering to track the executed instruction PC in the stats histograms.
+     * This avoids having to keep a shadow copy of the tracing state in the backend.
+     */
+    data->stats.process_instr(entry);
+
+    /*
+     * XXX-AM: instead of having one big instruction recor, we may have different messages for
+     * optional parts of the instruction message, on the same track/category: e.g. mode swtich,
+     * interrupt information and modified registers?
+     */
+    TRACE_EVENT_INSTANT("instructions", "stream", data->cpu_track,
+        [&](perfetto::EventContext ctx) {
+            auto *qemu_arg = ctx.event()->set_qemu();
+            auto *instr = qemu_arg->set_instr();
+            auto flags =  perfetto_log_entry_flags(entry);
+
+            /*
+             * Populate protobuf from internal qemu structure.
+             * XXX-AM: It would be very nice if we could somehow skip this step
+             * and have the qemu internal representation be protobuf-based, so
+             * that here we only have to embed the qemu-specific packet
+             * into the track_event. Ideally this would save us all this copying around of
+             * the event data but I have no clue about the implications for the stability
+             * of the C/C++ protobuf-generated structures or whether we can embed the
+             * qemu portion of the packet already in the serialized wire-format
+             * (which should be stable by design).
+             * This can probably be done via protozero::Message::AppendScatteredBytes().
+             */
+            assert(flags & LI_FLAG_HAS_INSTR_DATA);
+            const char *bytes = perfetto_log_entry_insn_bytes(entry);
+            int size = perfetto_log_entry_insn_size(entry);
+            int nitems;
+            std::stringstream ss;
+
+            // XXX-AM: We can not use a bytes field in the protobuf because perfetto lacks
+            // support. This is slightly sad as this is an high-frequency event.
+            for (int i = 0; i < size; i++) {
+                ss << std::hex << std::setw(2) << std::setfill('0') <<
+                        (static_cast<unsigned int>(bytes[i]) & 0xff) << " ";
+            }
+            instr->set_opcode(ss.str());
+            instr->set_pc(perfetto_log_entry_pc(entry));
+
+            nitems = perfetto_log_entry_regs(entry);
+            for (int i = 0; i < nitems; i++) {
+                auto flags = perfetto_reg_info_flags(entry, i);
+                auto *reginfo = instr->add_reg();
+                reginfo->set_name(perfetto_reg_info_name(entry, i));
+                if ((flags & LRI_CAP_REG) && (flags & LRI_HOLDS_CAP)) {
+                    cap_register_handle cap_handle = perfetto_reg_info_cap(entry, i);
+                    auto *capinfo = reginfo->set_cap_val();
+                    trace_cap_register(capinfo, cap_handle);
+                } else {
+                    reginfo->set_int_val(perfetto_reg_info_gpr(entry, i));
+                }
+            }
+            nitems = perfetto_log_entry_mem(entry);
+            for (int i = 0; i < nitems; i++) {
+                auto flags = perfetto_mem_info_flags(entry, i);
+                auto *meminfo = instr->add_mem();
+                meminfo->set_addr(perfetto_mem_info_addr(entry, i));
+                switch (flags) {
+                    case LMI_LD:
+                        meminfo->set_op(perfetto::protos::pbzero::MemInfo::LOAD);
+                        break;
+                    case LMI_LD | LMI_CAP:
+                        meminfo->set_op(perfetto::protos::pbzero::MemInfo::CLOAD);
+                        break;
+                    case LMI_ST:
+                        meminfo->set_op(perfetto::protos::pbzero::MemInfo::STORE);
+                        break;
+                    case LMI_ST | LMI_CAP:
+                        meminfo->set_op(perfetto::protos::pbzero::MemInfo::CSTORE);
+                        break;
+                    default:
+                        // XXX Notify error somehow?
+                        break;
+                }
+                if (flags & LMI_CAP) {
+                    auto *capinfo = meminfo->set_cap_val();
+                    cap_register_handle cap_handle = perfetto_reg_info_cap(entry, i);
+                    trace_cap_register(capinfo, cap_handle);
+                } else {
+                    meminfo->set_int_val(perfetto_mem_info_value(entry, i));
+                }
+            }
+
+            if (flags & LI_FLAG_INTR_MASK) {
+                // interrupt
+                auto *trap = instr->set_trap();
+                if (flags & LI_FLAG_INTR_TRAP)
+                    trap->set_type(perfetto::protos::pbzero::Trap::EXCEPTION);
+                else {
+                    trap->set_type(perfetto::protos::pbzero::Trap::INTERRUPT);
+                }
+                trap->set_trap_number(perfetto_log_entry_intr_code(entry));
+            }
+            if (flags & LI_FLAG_MODE_SWITCH) {
+                auto mode = qemu_cpu_mode_to_trace(perfetto_log_entry_next_cpu_mode(entry));
+                instr->set_mode(mode);
+            }
+        });
 }
 
 } /* anonymous */
@@ -262,100 +369,11 @@ extern "C" void perfetto_sync_cpu(void *backend_data)
 extern "C" void perfetto_emit_instr(void *backend_data, cpu_log_entry_handle entry)
 {
     auto *data = reinterpret_cast<perfetto_backend_data *>(backend_data);
+    auto flags = perfetto_log_entry_flags(entry);
 
-    TRACE_EVENT_INSTANT("instructions", "stream", data->cpu_track,
-        [&](perfetto::EventContext ctx) {
-            auto *qemu_arg = ctx.event()->set_qemu();
-            auto *instr = qemu_arg->set_instr();
-            auto flags =  perfetto_log_entry_flags(entry);
-
-            /*
-             * Populate protobuf from internal qemu structure.
-             * XXX-AM: It would be very nice if we could somehow skip this step
-             * and have the qemu internal representation be protobuf-based, so
-             * that here we only have to embed the qemu-specific packet
-             * into the track_event. Ideally this would save us all this copying around of
-             * the event data but I have no clue about the implications for the stability
-             * of the C/C++ protobuf-generated structures or whether we can embed the
-             * qemu portion of the packet already in the serialized wire-format
-             * (which should be stable by design).
-             * This can probably be done via protozero::Message::AppendScatteredBytes().
-             */
-
-            if (flags & LI_FLAG_HAS_INSTR_DATA) {
-                const char *bytes = perfetto_log_entry_insn_bytes(entry);
-                int size = perfetto_log_entry_insn_size(entry);
-                int nitems;
-                std::stringstream ss;
-
-                // XXX-AM: We can not use a bytes field in the protobuf because perfetto lacks
-                // support. This is slightly sad as this is an high-frequency event.
-                for (int i = 0; i < size; i++) {
-                    ss << std::hex << std::setw(2) << std::setfill('0') <<
-                            (static_cast<unsigned int>(bytes[i]) & 0xff) << " ";
-                }
-                instr->set_opcode(ss.str());
-                instr->set_pc(perfetto_log_entry_pc(entry));
-
-                nitems = perfetto_log_entry_regs(entry);
-                for (int i = 0; i < nitems; i++) {
-                    auto flags = perfetto_reg_info_flags(entry, i);
-                    auto *reginfo = instr->add_reg();
-                    reginfo->set_name(perfetto_reg_info_name(entry, i));
-                    if ((flags & LRI_CAP_REG) && (flags & LRI_HOLDS_CAP)) {
-                        cap_register_handle cap_handle = perfetto_reg_info_cap(entry, i);
-                        auto *capinfo = reginfo->set_cap_val();
-                        trace_cap_register(capinfo, cap_handle);
-                    } else {
-                        reginfo->set_int_val(perfetto_reg_info_gpr(entry, i));
-                    }
-                }
-                nitems = perfetto_log_entry_mem(entry);
-                for (int i = 0; i < nitems; i++) {
-                    auto flags = perfetto_mem_info_flags(entry, i);
-                    auto *meminfo = instr->add_mem();
-                    meminfo->set_addr(perfetto_mem_info_addr(entry, i));
-                    switch (flags) {
-                        case LMI_LD:
-                            meminfo->set_op(perfetto::protos::pbzero::MemInfo::LOAD);
-                            break;
-                        case LMI_LD | LMI_CAP:
-                            meminfo->set_op(perfetto::protos::pbzero::MemInfo::CLOAD);
-                            break;
-                        case LMI_ST:
-                            meminfo->set_op(perfetto::protos::pbzero::MemInfo::STORE);
-                            break;
-                        case LMI_ST | LMI_CAP:
-                            meminfo->set_op(perfetto::protos::pbzero::MemInfo::CSTORE);
-                            break;
-                        default:
-                            // XXX Notify error somehow?
-                            break;
-                    }
-                    if (flags & LMI_CAP) {
-                        auto *capinfo = meminfo->set_cap_val();
-                        cap_register_handle cap_handle = perfetto_reg_info_cap(entry, i);
-                        trace_cap_register(capinfo, cap_handle);
-                    } else {
-                        meminfo->set_int_val(perfetto_mem_info_value(entry, i));
-                    }
-                }
-            }
-            if (flags & LI_FLAG_INTR_MASK) {
-                // interrupt
-                auto *trap = instr->set_trap();
-                if (flags & LI_FLAG_INTR_TRAP)
-                    trap->set_type(perfetto::protos::pbzero::Trap::EXCEPTION);
-                else {
-                    trap->set_type(perfetto::protos::pbzero::Trap::INTERRUPT);
-                }
-                trap->set_trap_number(perfetto_log_entry_intr_code(entry));
-            }
-            if (flags & LI_FLAG_MODE_SWITCH) {
-                auto mode = qemu_cpu_mode_to_trace(perfetto_log_entry_next_cpu_mode(entry));
-                instr->set_mode(mode);
-            }
-        });
-
-    process_extra_events(data, entry);
+    /* Process events first to react to START/STOP tracing events if needed */
+    process_events(data, entry);
+    if (flags & LI_FLAG_HAS_INSTR_DATA) {
+        process_instr(data, entry);
+    }
 }
