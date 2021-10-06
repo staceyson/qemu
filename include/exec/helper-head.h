@@ -49,8 +49,8 @@
 #define dh_ctype_cptr const void *
 #define dh_ctype_void void
 #define dh_ctype_memop MemOp
-/* Can't use TCGMemOpIdx here due to include ordering. */
-#define dh_ctype_memop_idx uint32_t /* TCGMemOpIdx */
+/* Can't use MemOpIdx here due to include ordering. */
+#define dh_ctype_memop_idx uint32_t /* MemOpIdx */
 #define dh_ctype_noreturn void QEMU_NORETURN
 #define dh_ctype(t) dh_ctype_##t
 

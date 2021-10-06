@@ -126,7 +126,7 @@ static inline void collect_magic_nop_stats(CPUMIPSState *env, struct nop_stats* 
 
 static inline void
 store_byte_and_clear_tag(CPUMIPSState *env, target_ulong vaddr, uint8_t val,
-                         TCGMemOpIdx oi, uintptr_t retaddr)
+                         MemOpIdx oi, uintptr_t retaddr)
 {
     helper_ret_stb_mmu(env, vaddr, val, oi, retaddr);
 #ifdef TARGET_CHERI
@@ -138,7 +138,7 @@ store_byte_and_clear_tag(CPUMIPSState *env, target_ulong vaddr, uint8_t val,
 
 static inline void
 store_u32_and_clear_tag(CPUMIPSState *env, target_ulong vaddr, uint32_t val,
-                         TCGMemOpIdx oi, uintptr_t retaddr)
+                         MemOpIdx oi, uintptr_t retaddr)
 {
     helper_ret_stw_mmu(env, vaddr, val, oi, retaddr);
 #ifdef TARGET_CHERI
@@ -161,7 +161,7 @@ static bool do_magic_memmove(CPUMIPSState *env, uint64_t ra, int dest_regnum, in
     const target_ulong original_src_ddc_offset = env->active_tc.gpr[src_regnum];  // $a1 = src
     const target_ulong original_len = env->active_tc.gpr[MIPS_REGNUM_A2];  // $a2 = len
     int mmu_idx = cpu_mmu_index(env, false);
-    TCGMemOpIdx oi = make_memop_idx(MO_UB, mmu_idx);
+    MemOpIdx oi = make_memop_idx(MO_UB, mmu_idx);
     target_ulong len = original_len;
     target_ulong already_written = 0;
     const bool is_continuation = (env->active_tc.gpr[MIPS_REGNUM_V1] >> 32) == MAGIC_LIBCALL_HELPER_CONTINUATION_FLAG;
@@ -351,7 +351,7 @@ static bool do_magic_memset(CPUMIPSState *env, uint64_t ra, uint pattern_length)
 
     // See target/s390x/mem_helper.c and arm/helper.c HELPER(dc_zva)
     int mmu_idx = cpu_mmu_index(env, false);
-    TCGMemOpIdx oi = make_memop_idx(MO_UB, mmu_idx);
+    MemOpIdx oi = make_memop_idx(MO_UB, mmu_idx);
 
     const target_ulong original_dest_ddc_offset = env->active_tc.gpr[MIPS_REGNUM_A0];      // $a0 = dest
     uint64_t value = env->active_tc.gpr[MIPS_REGNUM_A1]; // $a1 = c
