@@ -230,10 +230,9 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
     cpu_log_entry_t *entry = get_cpu_log_entry(env);
     qemu_log_instr_loglevel_t prev_level = cpulog->loglevel;
     bool prev_level_active = cpulog->loglevel_active;
-    /* qemu_log_instr_loglevel_t next_level = data.host_int; */
-    bool next_level_active;
     qemu_log_next_level_arg_t *arg = data.host_ptr;
     target_ulong pc = (arg->global) ? cpu_get_recent_pc(env) : arg->pc;
+    bool next_level_active;
 
     log_assert(qemu_loglevel_mask(CPU_LOG_INSTR));
 
@@ -277,7 +276,6 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
             reset_log_buffer(cpulog, entry);
             goto done;
         }
-        /* emit_stop_event(entry, cpu_get_recent_pc(env)); */
         emit_stop_event(entry, pc);
         do_instr_commit(env);
         /* Instruction commit may have advanced to the next entry buffer slot */

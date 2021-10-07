@@ -94,10 +94,7 @@ typedef enum {
 /*
  * Trace event identifiers.
  */
-typedef enum {
-    LOG_EVENT_STATE = 0,
-    LOG_EVENT_CTX_SWITCH = 1,
-} log_event_id_t;
+typedef enum { LOG_EVENT_STATE = 0, LOG_EVENT_CTX_UPDATE = 1 } log_event_id_t;
 
 /*
  * Tracing status changed (e.g. trace start/stop)
@@ -113,14 +110,22 @@ typedef struct {
     uint64_t pc;
 } log_event_trace_state_update_t;
 
+typedef enum {
+    /*
+     * Switch context from the current to the new (proc, thread, compartment) ID
+     */
+    LOG_EVENT_CTX_OP_SWITCH = 1
+} log_event_ctx_update_op_t;
+
 /*
- * Context switch event.
+ * Context update event.
  */
 typedef struct {
-    uint64_t pid; /* Process ID */
-    uint64_t tid; /* Thread ID */
-    uint64_t cid; /* Compartment ID */
-} log_event_ctx_switch_t;
+    log_event_ctx_update_op_t op; /* What changed */
+    uint64_t pid;                 /* Process ID */
+    uint64_t tid;                 /* Thread ID */
+    uint64_t cid;                 /* Compartment ID */
+} log_event_ctx_update_t;
 
 /*
  * Trace event.
@@ -131,7 +136,7 @@ typedef struct {
     log_event_id_t id;
     union {
         log_event_trace_state_update_t state;
-        log_event_ctx_switch_t ctx_switch;
+        log_event_ctx_update_t ctx_update;
     };
 } log_event_t;
 

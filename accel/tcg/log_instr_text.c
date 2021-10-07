@@ -210,10 +210,12 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
                          log_state_op, event->state.pc);
             }
             break;
-        case LOG_EVENT_CTX_SWITCH:
+        case LOG_EVENT_CTX_UPDATE:
             qemu_log("Context switch pid=0x%lx tid=0x%lx cid=0x%lx\n",
-                     event->ctx_switch.pid, event->ctx_switch.tid,
-                     event->ctx_switch.cid);
+                     event->ctx_update.pid, event->ctx_update.tid,
+                     event->ctx_update.cid);
+        default:
+            assert(0 && "unknown event ID");
         }
     }
 }

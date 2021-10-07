@@ -39,6 +39,7 @@
 #include <sstream>
 #include <iomanip>
 #include <string>
+#include <map>
 #include <vector>
 #include <pthread.h>
 #include <fcntl.h>
@@ -49,6 +50,7 @@
 #include "exec/log_instr_internal.h"
 #include "exec/log_instr_perfetto.h"
 #include "trace_extra/trace_stats.hh"
+#include "trace_extra/guest_context_tracker.hh"
 
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();
 
@@ -65,37 +67,30 @@ fs::path logfile("qemu_trace.pb");
 /* category strings */
 std::vector<std::string> categories;
 
-static unsigned long
-gen_track_uuid(int cpu_id) {
-    // use perfetto::Uuid?
-    static unsigned long next_track_id = 0x100;
-    return (next_track_id++);
-}
+/* Global scheduling event track */
+std::unique_ptr<perfetto::Track> sched_track;
 
 /*
  * Private per-CPU state.
  */
-struct perfetto_backend_data {
-    // Per-CPU track. This will be the parent track for all events on this CPU.
-    perfetto::Track cpu_track;
+struct perfetto_backend_data
+{
     // Per-CPU control track. This records tracing control events.
-    perfetto::Track cpu_ctrl_track;
+    perfetto::Track ctrl_track_;
     // Per-CPU aggregate statistics
-    cheri::qemu_stats stats;
+    cheri::qemu_stats stats_;
+    cheri::guest_context_tracker ctx_tracker_;
 
     perfetto_backend_data(int cpu_id) :
-        cpu_track(perfetto::Track::Global(gen_track_uuid(cpu_id))),
-        cpu_ctrl_track(perfetto::Track::Global(gen_track_uuid(cpu_id)))
-    {
-        std::string track_name("CPU " + std::to_string(cpu_id));
-        std::string ctrl_name(track_name + " CTRL");
+        ctrl_track_(perfetto::Track::Global(cheri::gen_track_uuid())),
+        ctx_tracker_(cpu_id)
 
-        auto desc = cpu_track.Serialize();
+    {
+        std::string track_name("CPU " + std::to_string(cpu_id) + " ctrl");
+
+        auto desc = ctrl_track_.Serialize();
         desc.set_name(track_name);
-        perfetto::TrackEvent::SetTrackDescriptor(cpu_track, desc);
-        desc = cpu_ctrl_track.Serialize();
-        desc.set_name(ctrl_name);
-        perfetto::TrackEvent::SetTrackDescriptor(cpu_ctrl_track, desc);
+        perfetto::TrackEvent::SetTrackDescriptor(ctrl_track_, desc);
     }
 };
 
@@ -120,7 +115,7 @@ bool perfetto_start_tracing(void)
     perfetto::Tracing::Initialize(args);
     perfetto::TrackEvent::Register();
 
-    cfg.add_buffers()->set_size_kb(1 << 16); // 64MiB
+    cfg.add_buffers()->set_size_kb(1 << 17); // 128MiB
     cfg.set_flush_period_ms(2000);
     cfg.set_file_write_period_ms(1000);
     fs::remove(logfile);
@@ -136,7 +131,7 @@ bool perfetto_start_tracing(void)
     ds_cfg->set_track_event_config_raw(track_cfg.SerializeAsString());
     auto *producer_cfg = cfg.add_producers();
     producer_cfg->set_producer_name("qemu-tcg");
-    producer_cfg->set_shm_size_kb(1 << 11); // 2MiB XXX need more space
+    producer_cfg->set_shm_size_kb(1 << 15); // 32MiB
 
     session = perfetto::Tracing::NewTrace();
 
@@ -144,10 +139,14 @@ bool perfetto_start_tracing(void)
     session->StartBlocking();
 
     perfetto::ProcessTrack qemu_proc = perfetto::ProcessTrack::Current();
-    perfetto::protos::gen::TrackDescriptor desc = qemu_proc.Serialize();
+    auto desc = qemu_proc.Serialize();
     desc.mutable_process()->set_process_name("qemu");
     perfetto::TrackEvent::SetTrackDescriptor(qemu_proc, desc);
 
+    sched_track.reset(new perfetto::Track(cheri::gen_track_uuid()));
+    desc = sched_track->Serialize();
+    desc.set_name("Scheduler ctrl");
+    perfetto::TrackEvent::SetTrackDescriptor(*sched_track, desc);
     return true;
 }
 
@@ -184,45 +183,58 @@ void
 process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
 {
     int nevents = perfetto_log_entry_events(entry);
+    bool have_startstop_event = false;
+
+    /*
+     * Note: LOG_EVENT_STATE events are emitted even when tracing is disabled.
+     * The rest of the events should only be emitted when tracing is active.
+     */
     for (int i = 0; i < nevents; i++) {
         log_event_t *evt = perfetto_log_event(entry, i);
         if (evt->id == LOG_EVENT_STATE) {
-            switch(evt->state.next_state) {
+            switch (evt->state.next_state) {
                 case LOG_EVENT_STATE_FLUSH:
-                    // XXX-AM: Emitting stats and TrackEvent flush should be two separate events TBH.
-                    TRACE_EVENT_INSTANT("ctrl", "flush", data->cpu_ctrl_track);
-                    data->stats.flush(data->cpu_track);
+                    TRACE_EVENT_INSTANT("ctrl", "flush", data->ctrl_track_);
                     perfetto::TrackEvent::Flush();
                     break;
                 case LOG_EVENT_STATE_START:
-                    data->stats_.unpause(data->cpu_track, evt->state.pc);
-                    TRACE_EVENT_BEGIN("ctrl", "tracing", data->cpu_ctrl_track);
+                    data->stats_.unpause(data->ctx_tracker_.get_ctx_track(), evt->state.pc);
+                    TRACE_EVENT_BEGIN("ctrl", "tracing", data->ctrl_track_);
+                    have_startstop_event = true;
                     break;
                 case LOG_EVENT_STATE_STOP:
-                    data->stats_.pause(data->cpu_track, evt->state.pc);
-                    TRACE_EVENT_END("ctrl", data->cpu_ctrl_track);
+                    data->stats_.pause(data->ctx_tracker_.get_ctx_track(), evt->state.pc);
+                    TRACE_EVENT_END("ctrl", data->ctrl_track_);
+                    have_startstop_event = true;
                     break;
+                default:
+                    assert(false && "Invalid state event");
             }
+        } else if (evt->id == LOG_EVENT_CTX_UPDATE) {
+            // Dump the stats for the current context to the right context track
+            data->stats_.flush(data->ctx_tracker_.get_ctx_track());
+            data->ctx_tracker_.context_update(&evt->ctx_update);
         }
     }
+
+    /*
+     * If we have instruction data, we assume that tracing is enabled and run extra
+     * stats gathering to track the executed instruction PC in the stats histograms.
+     * This avoids having to keep a shadow copy of the tracing state in the backend.
+     */
+    if (!have_startstop_event && (perfetto_log_entry_flags(entry) & LI_FLAG_HAS_INSTR_DATA) != 0)
+        data->stats_.process_instr(data->ctx_tracker_.get_ctx_track(), entry);
 }
 
 void
 process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
 {
     /*
-     * If we have instruction data, we assume that tracing is enabled and run extra
-     * stats gathering to track the executed instruction PC in the stats histograms.
-     * This avoids having to keep a shadow copy of the tracing state in the backend.
-     */
-    data->stats.process_instr(entry);
-
-    /*
      * XXX-AM: instead of having one big instruction record, we may have different messages for
      * optional parts of the instruction message, on the same track/category: e.g. mode swtich,
      * interrupt information and modified registers?
      */
-    TRACE_EVENT_INSTANT("instructions", "stream", data->cpu_track,
+    TRACE_EVENT_INSTANT("instructions", "stream", data->ctx_tracker_.get_ctx_track(),
         [&](perfetto::EventContext ctx) {
             auto *qemu_arg = ctx.event()->set_qemu();
             auto *instr = qemu_arg->set_instr();

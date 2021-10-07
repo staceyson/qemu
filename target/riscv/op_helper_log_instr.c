@@ -79,12 +79,14 @@ void HELPER(riscv_log_instr_event)(CPURISCVState *env, target_ulong pc)
 
     event.id = get_gpr_value(env, 10);
     switch (event.id) {
-    case LOG_EVENT_CTX_SWITCH:
-        event.ctx_switch.pid = get_gpr_value(env, 11);
-        event.ctx_switch.tid = get_gpr_value(env, 12);
-        event.ctx_switch.cid = get_gpr_value(env, 13);
+    case LOG_EVENT_CTX_UPDATE:
+        event.ctx_update.op = get_gpr_value(env, 11);
+        event.ctx_update.pid = get_gpr_value(env, 12);
+        event.ctx_update.tid = get_gpr_value(env, 13);
+        event.ctx_update.cid = get_gpr_value(env, 14);
         break;
     default:
+        warn_report("Unsupported event ID for TCG instr logging %d", event.id);
         return;
     }
     qemu_log_instr_event(env, &event);

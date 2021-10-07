@@ -94,6 +94,7 @@ void qemu_stats::unpause(perfetto::Track &track, uint64_t pc)
 {
     /* Reset the pc-tracking state */
     pc_range_start = last_pc = pc;
+    /* unpause will be called on the first instruction to be traced? */
     icount = 1; // Unpause is called for the first instruction being traced
 }
 

@@ -40,12 +40,27 @@
 #include <cstdint>
 #include <perfetto.h>
 
+/*
+ * For each CPU we have the following tracks:
+ * CPU N: track for generic CPU events, contains the following categories:
+ *   - instructions: events related to the instruction stream
+ *   - sched: scheduling events on the CPU (context switches)
+ *   - trap: Contains interrupt and trap events with help from OS-driven events
+ *   - ctrl: Tracing control events (e.g. when tracing is started and stopped)
+ * Process/Thread/Compartment tracks:
+ *   these are dynamic tracks that are created in response to OS-driven events,
+ *   we rely on the OS to pass the pid/tid/cid triple when relevant.
+ *   Each of these tracks is used to accumulate per-thread and per-compartment
+ *   information.
+ */
 PERFETTO_DEFINE_CATEGORIES(
     perfetto::Category("instructions")
         .SetDescription("CPU instructions executed"),
     perfetto::Category("memory").SetDescription("Tag and memory load/store"),
     perfetto::Category("stats").SetDescription("High-level statistics data"),
-    perfetto::Category("ctrl").SetDescription("Tracing control events"));
+    perfetto::Category("ctrl").SetDescription("Tracing control events"),
+    perfetto::Category("trap").SetDescription("CPU trap events"),
+    perfetto::Category("sched").SetDescription("Scheduling events"));
 #endif
 
 /*

@@ -6,6 +6,7 @@ qemutrace_ss.add(when: ['CONFIG_TCG', 'CONFIG_TRACE_PERFETTO'],
 
 qemutrace_ss.add(when: ['CONFIG_TCG', 'CONFIG_TRACE_PERFETTO'],
                  if_true: files('trace_perfetto.cc', 'trace_stats.cc',
+                                'guest_context_tracker.cc',
                                 'cheri-perfetto/sdk/perfetto.cc'))
 
 qemutrace_ss = qemutrace_ss.apply(config_all, strict: false)
