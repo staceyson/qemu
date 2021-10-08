@@ -76,16 +76,19 @@ void qemu_stats::flush(perfetto::Track &track)
 void qemu_stats::pause(uint64_t pc)
 {
     /*
-     * XXX should we treat this as the end of the block? otherwise the
+     * Treat this as the end of the block, otherwise the
      * current PC slice will be lost.
      */
-    pc_range_start = last_pc = 0;
+    bb_hit_map +=
+        std::make_pair(addr_range::right_open(pc_range_start, pc), icount);
+    pc_range_start = last_pc = icount = 0;
 }
 
 void qemu_stats::unpause(uint64_t pc)
 {
     /* Reset the pc-tracking state */
     pc_range_start = last_pc = pc;
+    icount = 0;
 }
 
 void qemu_stats::clear()
@@ -99,16 +102,15 @@ void qemu_stats::process_instr(perfetto::Track &ctx_track,
 {
     uint64_t pc = perfetto_log_entry_pc(entry);
     int size = perfetto_log_entry_insn_size(entry);
-
-    if (pc == 0) {
-        pc_range_start = pc;
-        last_pc = pc;
-    } else if (pc - last_pc > size) {
+    if (pc - last_pc > size) {
         // presume we are branching
         bb_hit_map += std::make_pair(
-            addr_range::right_open(pc_range_start, last_pc), 1UL);
+            addr_range::right_open(pc_range_start, last_pc), icount);
         pc_range_start = pc;
+        icount = 0;
         branch_map[pc] += 1;
+    } else {
+        icount += 1;
     }
     last_pc = pc;
 }

@@ -56,9 +56,10 @@ class qemu_stats
      */
     uint64_t last_pc;
     uint64_t pc_range_start;
+    uint64_t icount;
 
   public:
-    qemu_stats() : last_pc(0), pc_range_start(0) {}
+    qemu_stats() : last_pc(0), pc_range_start(0), icount(0) {}
     void process_instr(perfetto::Track &track, cpu_log_entry_handle entry);
     void pause(uint64_t pc);
     void unpause(uint64_t pc);
