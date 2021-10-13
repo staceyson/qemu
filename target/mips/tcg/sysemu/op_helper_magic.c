@@ -128,7 +128,7 @@ static inline void
 store_byte_and_clear_tag(CPUMIPSState *env, target_ulong vaddr, uint8_t val,
                          MemOpIdx oi, uintptr_t retaddr)
 {
-    helper_ret_stb_mmu(env, vaddr, val, oi, retaddr);
+    cpu_stb_mmu(env, vaddr, val, oi, retaddr);
 #ifdef TARGET_CHERI
     // If we returned (i.e. write was successful) we also need to invalidate the
     // tags bit to ensure we are consistent with sb
@@ -140,7 +140,12 @@ static inline void
 store_u32_and_clear_tag(CPUMIPSState *env, target_ulong vaddr, uint32_t val,
                          MemOpIdx oi, uintptr_t retaddr)
 {
-    helper_ret_stw_mmu(env, vaddr, val, oi, retaddr);
+#ifdef TARGET_WORDS_BIGENDIAN
+    cpu_stw_be_mmu(env, vaddr, val, oi, retaddr);
+#else
+    cpu_stw_le_mmu(env, vaddr, val, oi, retaddr);
+#endif
+
 #ifdef TARGET_CHERI
     // If we returned (i.e. write was successful) we also need to invalidate the
     // tags bit to ensure we are consistent with sb
@@ -278,7 +283,7 @@ static bool do_magic_memmove(CPUMIPSState *env, uint64_t ra, int dest_regnum, in
         tcg_debug_assert(original_len - already_written == len);
         collect_magic_nop_stats(env, &magic_memmove_slowpath, len);
         while (already_written < original_len) {
-            uint8_t value = helper_ret_ldub_mmu(env, current_src_cursor, oi, ra);
+            uint8_t value = cpu_ldb_mmu(env, current_src_cursor, oi, ra);
             store_byte_and_clear_tag(env, current_dest_cursor, value, oi, ra); // might trap
              current_dest_cursor--;
             current_src_cursor--;
@@ -303,7 +308,7 @@ static bool do_magic_memmove(CPUMIPSState *env, uint64_t ra, int dest_regnum, in
         tcg_debug_assert(original_len - already_written == len);
         collect_magic_nop_stats(env, &magic_memmove_slowpath, len);
         while (already_written < original_len) {
-            uint8_t value = helper_ret_ldub_mmu(env, current_src_cursor, oi, ra);
+            uint8_t value = cpu_ldb_mmu(env, current_src_cursor, oi, ra);
             store_byte_and_clear_tag(env, current_dest_cursor, value, oi, ra); // might trap
             current_dest_cursor++;
             current_src_cursor++;
