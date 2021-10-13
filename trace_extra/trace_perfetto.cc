@@ -195,11 +195,11 @@ process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
                     perfetto::TrackEvent::Flush();
                     break;
                 case LOG_EVENT_STATE_START:
-                    data->stats.unpause(entry);
+                    data->stats_.unpause(data->cpu_track, evt->state.pc);
                     TRACE_EVENT_BEGIN("ctrl", "tracing", data->cpu_ctrl_track);
                     break;
                 case LOG_EVENT_STATE_STOP:
-                    data->stats.pause(entry);
+                    data->stats_.pause(data->cpu_track, evt->state.pc);
                     TRACE_EVENT_END("ctrl", data->cpu_ctrl_track);
                     break;
             }
@@ -218,7 +218,7 @@ process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
     data->stats.process_instr(entry);
 
     /*
-     * XXX-AM: instead of having one big instruction recor, we may have different messages for
+     * XXX-AM: instead of having one big instruction record, we may have different messages for
      * optional parts of the instruction message, on the same track/category: e.g. mode swtich,
      * interrupt information and modified registers?
      */

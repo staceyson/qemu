@@ -61,8 +61,8 @@ class qemu_stats
   public:
     qemu_stats() : last_pc(0), pc_range_start(0), icount(0) {}
     void process_instr(perfetto::Track &track, cpu_log_entry_handle entry);
-    void pause(uint64_t pc);
-    void unpause(uint64_t pc);
+    void pause(perfetto::Track &track, uint64_t pc);
+    void unpause(perfetto::Track &track, uint64_t pc);
     void flush(perfetto::Track &track);
     void clear();
 };

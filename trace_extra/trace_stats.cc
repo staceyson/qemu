@@ -73,7 +73,7 @@ void qemu_stats::flush(perfetto::Track &track)
     clear();
 }
 
-void qemu_stats::pause(uint64_t pc)
+void qemu_stats::pause(perfetto::Track &track, uint64_t pc)
 {
     /*
      * Treat this as the end of the block, otherwise the
@@ -82,13 +82,19 @@ void qemu_stats::pause(uint64_t pc)
     bb_hit_map +=
         std::make_pair(addr_range::right_open(pc_range_start, pc), icount);
     pc_range_start = last_pc = icount = 0;
+    /*
+     * Whenever we pause tracing, we need to sync the stats to trace,
+     * otherwise we may charge the wrong context if tracing
+     * is restarted in another thread.
+     */
+    flush(track);
 }
 
-void qemu_stats::unpause(uint64_t pc)
+void qemu_stats::unpause(perfetto::Track &track, uint64_t pc)
 {
     /* Reset the pc-tracking state */
     pc_range_start = last_pc = pc;
-    icount = 0;
+    icount = 1; // Unpause is called for the first instruction being traced
 }
 
 void qemu_stats::clear()
@@ -107,7 +113,8 @@ void qemu_stats::process_instr(perfetto::Track &ctx_track,
         bb_hit_map += std::make_pair(
             addr_range::right_open(pc_range_start, last_pc), icount);
         pc_range_start = pc;
-        icount = 0;
+        icount =
+            1; // Reset icount triggered on the first instruction of the next BB
         branch_map[pc] += 1;
     } else {
         icount += 1;
