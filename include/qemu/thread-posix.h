@@ -4,6 +4,10 @@
 #include <pthread.h>
 #include <semaphore.h>
 
+#ifdef __FreeBSD__
+#include <pthread_np.h>
+#endif
+
 struct QemuMutex {
     pthread_mutex_t lock;
 #ifdef CONFIG_DEBUG_MUTEX

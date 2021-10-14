@@ -1,4 +1,4 @@
-if 'CONFIG_TRACE_SYSTEMTAP' in config_host
+if stap.found()
   install_data('qemu-trace-stap', install_dir: get_option('bindir'))
 endif
 install_data('symbolize-cheri-trace.py', install_dir: get_option('bindir'))
