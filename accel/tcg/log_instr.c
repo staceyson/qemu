@@ -201,11 +201,6 @@ static void do_instr_commit(CPUArchState *env)
         }
     }
 
-    if (cpulog->starting) {
-        cpulog->starting = false;
-        emit_start_event(entry, cpu_get_recent_pc(env));
-    }
-
     if (cpulog->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) {
         cpulog->ring_head = (cpulog->ring_head + 1) % cpulog->instr_info->len;
         if (cpulog->ring_tail == cpulog->ring_head)
@@ -235,11 +230,15 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
     cpu_log_entry_t *entry = get_cpu_log_entry(env);
     qemu_log_instr_loglevel_t prev_level = cpulog->loglevel;
     bool prev_level_active = cpulog->loglevel_active;
-    qemu_log_instr_loglevel_t next_level = data.host_int;
+    /* qemu_log_instr_loglevel_t next_level = data.host_int; */
     bool next_level_active;
+    qemu_log_next_level_arg_t *arg = data.host_ptr;
+    target_ulong pc = (arg->global) ? cpu_get_recent_pc(env) : arg->pc;
+
+    log_assert(qemu_loglevel_mask(CPU_LOG_INSTR));
 
     /* Decide whether we have to pause/resume logging */
-    switch (next_level) {
+    switch (arg->next_level) {
     case QEMU_LOG_INSTR_LOGLEVEL_NONE:
         next_level_active = false;
         break;
@@ -263,23 +262,23 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
     }
 
     /* Update level */
-    cpulog->loglevel = next_level;
+    cpulog->loglevel = arg->next_level;
     cpulog->loglevel_active = next_level_active;
 
     /* Check if this was a no-op */
-    if (next_level == prev_level && prev_level_active == next_level_active)
-        return;
-
-    /* Flushing all translations makes things incredibly slow. Instead,
-     * we put whether tracing is currently enabled into cflags */
-
+    if (arg->next_level == prev_level &&
+        prev_level_active == next_level_active) {
+        goto done;
+    }
+    tb_flush(cpu);
     /* Emit start/stop events */
     if (prev_level_active) {
         if (cpulog->starting) {
             reset_log_buffer(cpulog, entry);
-            return;
+            goto done;
         }
-        emit_stop_event(entry, cpu_get_recent_pc(env));
+        /* emit_stop_event(entry, cpu_get_recent_pc(env)); */
+        emit_stop_event(entry, pc);
         do_instr_commit(env);
         /* Instruction commit may have advanced to the next entry buffer slot */
         entry = get_cpu_log_entry(env);
@@ -287,14 +286,27 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
     }
     if (next_level_active) {
         cpulog->starting = true;
+        /*
+         * Note: the start event is emitted by the first instruction being
+         * traced
+         */
+        emit_start_event(entry, pc);
     }
+
+done:
+    g_free(arg);
 }
 
-static void cpu_loglevel_switch(CPUArchState *env,
-                                qemu_log_instr_loglevel_t level)
+static void cpu_loglevel_switch(CPUArchState *env, target_ulong pc,
+                                qemu_log_instr_loglevel_t level, bool global)
 {
+    qemu_log_next_level_arg_t *arg = g_new(qemu_log_next_level_arg_t, 1);
+
+    arg->next_level = level;
+    arg->pc = pc;
+    arg->global = global;
     async_safe_run_on_cpu(env_cpu(env), do_cpu_loglevel_switch,
-                          RUN_ON_CPU_HOST_INT(level));
+                          RUN_ON_CPU_HOST_PTR(arg));
 }
 
 /* Start global logging flag if it was disabled */
@@ -311,10 +323,11 @@ static void global_loglevel_enable(void)
  */
 static void do_global_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
 {
-    qemu_log_instr_loglevel_t level = data.host_int;
+    qemu_log_next_level_arg_t *arg = data.host_ptr;
 
-    if (level != QEMU_LOG_INSTR_LOGLEVEL_NONE)
+    if (arg->next_level != QEMU_LOG_INSTR_LOGLEVEL_NONE) {
         global_loglevel_enable();
+    }
     /*
      * TODO(am2419): To do things cleanly, we should clear the CPU_LOG_INSTR
      * flag when stopping, however to do this we would need to keep track
@@ -322,7 +335,7 @@ static void do_global_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
      * clear the flag on the last CPU.
      * qemu_set_log_internal(qemu_loglevel & (~CPU_LOG_INSTR));
      */
-    do_cpu_loglevel_switch(cpu, RUN_ON_CPU_HOST_INT(level));
+    do_cpu_loglevel_switch(cpu, data);
 }
 
 /*
@@ -335,21 +348,16 @@ static void do_global_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
 int qemu_log_instr_global_switch(int log_flags)
 {
     CPUState *cpu;
-    qemu_log_instr_loglevel_t level;
+    qemu_log_next_level_arg_t *arg = g_new(qemu_log_next_level_arg_t, 1);
 
-    if (log_flags & CPU_LOG_INSTR_U) {
-        level = QEMU_LOG_INSTR_LOGLEVEL_USER;
-        log_flags |= CPU_LOG_INSTR;
-    } else if (log_flags & CPU_LOG_INSTR) {
-        level = QEMU_LOG_INSTR_LOGLEVEL_ALL;
-    } else {
-        level = QEMU_LOG_INSTR_LOGLEVEL_NONE;
-    }
+    arg->next_level = (request_stop) ? QEMU_LOG_INSTR_LOGLEVEL_NONE
+                                     : QEMU_LOG_INSTR_LOGLEVEL_ALL;
+    arg->global = true;
 
     CPU_FOREACH(cpu)
     {
         async_safe_run_on_cpu(cpu, do_global_loglevel_switch,
-                              RUN_ON_CPU_HOST_INT(level));
+                              RUN_ON_CPU_HOST_PTR(arg));
     }
 
     return log_flags;
@@ -399,6 +407,7 @@ void qemu_log_instr_init(CPUState *cpu)
     cpu_log_instr_state_t *cpulog = &cpu->log_state;
     GArray *entry_ring = g_array_sized_new(false, true, sizeof(cpu_log_entry_t),
                                            reset_entry_buffer_size);
+    qemu_log_next_level_arg_t start_level;
     cpu_log_entry_t *entry;
     int i;
 
@@ -434,12 +443,11 @@ void qemu_log_instr_init(CPUState *cpu)
     }
 
     /* If we are starting with instruction logging enabled, switch it on now */
-    if (qemu_loglevel_mask(CPU_LOG_INSTR_U))
-        do_cpu_loglevel_switch(
-            cpu, RUN_ON_CPU_HOST_INT(QEMU_LOG_INSTR_LOGLEVEL_USER));
-    else if (qemu_loglevel_mask(CPU_LOG_INSTR))
-        do_cpu_loglevel_switch(
-            cpu, RUN_ON_CPU_HOST_INT(QEMU_LOG_INSTR_LOGLEVEL_ALL));
+    if (qemu_loglevel_mask(CPU_LOG_INSTR)) {
+        start_level.next_level = QEMU_LOG_INSTR_LOGLEVEL_ALL;
+        start_level.global = true;
+        do_cpu_loglevel_switch(cpu, RUN_ON_CPU_HOST_PTR(&start_level));
+    }
 
     if (reset_filters != NULL) {
         for (i = 0; i < reset_filters->len; i++) {
@@ -549,12 +557,13 @@ void qemu_log_instr_mode_switch(CPUArchState *env,
 
     /* If we are not logging in user-only mode, bail */
     if (!qemu_loglevel_mask(CPU_LOG_INSTR) ||
-        cpulog->loglevel != QEMU_LOG_INSTR_LOGLEVEL_USER)
+        cpulog->loglevel != QEMU_LOG_INSTR_LOGLEVEL_USER) {
         return;
+    }
 
     /* Check if we are switching to an interesting mode */
     if ((mode == QEMU_LOG_INSTR_CPU_USER) != cpulog->loglevel_active) {
-        cpu_loglevel_switch(env, cpulog->loglevel);
+        cpu_loglevel_switch(env, pc, cpulog->loglevel, false);
     }
 }
 
@@ -1194,8 +1203,9 @@ void helper_qemu_log_instr_buffer_flush(CPUArchState *env)
     qemu_log_instr_flush(env);
 }
 
-/* Start logging all instructions on the current CPU */
-void helper_qemu_log_instr_start(CPUArchState *env, target_ulong pc)
+static void do_qemu_log_instr_start(CPUArchState *env, target_ulong pc,
+                                    qemu_log_instr_loglevel_t level,
+                                    bool global)
 {
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
 
@@ -1203,33 +1213,35 @@ void helper_qemu_log_instr_start(CPUArchState *env, target_ulong pc)
     global_loglevel_enable();
 
     /* If we are already started in the correct mode, bail */
-    if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_ALL &&
-        cpulog->loglevel_active)
+    if (cpulog->loglevel == level && cpulog->loglevel_active) {
         return;
+    }
 
-    cpu_loglevel_switch(env, QEMU_LOG_INSTR_LOGLEVEL_ALL);
+    cpu_loglevel_switch(env, pc, level, global);
+}
+
+static void do_qemu_log_instr_stop(CPUArchState *env, target_ulong pc,
+                                   bool global)
+{
+    cpu_loglevel_switch(env, pc, QEMU_LOG_INSTR_LOGLEVEL_NONE, global);
+}
+
+/* Start logging all instructions on the current CPU */
+void helper_qemu_log_instr_start(CPUArchState *env, target_ulong pc)
+{
+    do_qemu_log_instr_start(env, pc, QEMU_LOG_INSTR_LOGLEVEL_ALL, false);
 }
 
 /* Start logging user-only instructions on the current CPU */
 void helper_qemu_log_instr_user_start(CPUArchState *env, target_ulong pc)
 {
-    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
-
-    log_assert(cpulog != NULL && "Invalid log state");
-    global_loglevel_enable();
-
-    /* If we are already in the correct mode, bail */
-    if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_USER)
-        return;
-
-    cpu_loglevel_switch(env, QEMU_LOG_INSTR_LOGLEVEL_USER);
+    do_qemu_log_instr_start(env, pc, QEMU_LOG_INSTR_LOGLEVEL_USER, false);
 }
 
 /* Stop logging on the current CPU */
 void helper_qemu_log_instr_stop(CPUArchState *env, target_ulong pc)
 {
-
-    cpu_loglevel_switch(env, QEMU_LOG_INSTR_LOGLEVEL_NONE);
+    do_qemu_log_instr_stop(env, pc, false);
 }
 
 /* Start logging all instructions on all CPUs */
@@ -1239,7 +1251,8 @@ void helper_qemu_log_instr_allcpu_start(void)
 
     CPU_FOREACH(cpu)
     {
-        helper_qemu_log_instr_start(cpu->env_ptr, 0);
+        do_qemu_log_instr_start(cpu->env_ptr, 0, QEMU_LOG_INSTR_LOGLEVEL_ALL,
+                                true);
     }
 }
 
@@ -1250,7 +1263,8 @@ void helper_qemu_log_instr_allcpu_user_start(void)
 
     CPU_FOREACH(cpu)
     {
-        helper_qemu_log_instr_user_start(cpu->env_ptr, 0);
+        do_qemu_log_instr_start(cpu->env_ptr, 0, QEMU_LOG_INSTR_LOGLEVEL_USER,
+                                true);
     }
 }
 
@@ -1261,7 +1275,7 @@ void helper_qemu_log_instr_allcpu_stop(void)
 
     CPU_FOREACH(cpu)
     {
-        helper_qemu_log_instr_stop(cpu->env_ptr, 0);
+        do_qemu_log_instr_stop(cpu->env_ptr, 0, true);
     }
 }
 

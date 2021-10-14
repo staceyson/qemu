@@ -60,6 +60,16 @@
 
 #ifndef __cplusplus
 /*
+ * Temporary argument to the log-level switching callbacks.
+ * This is passed internally to async_run_on_cpu()
+ */
+typedef struct {
+    bool global;
+    qemu_log_instr_loglevel_t next_level;
+    target_ulong pc;
+} qemu_log_next_level_arg_t;
+
+/*
  * Instruction log info associated with each committed log entry.
  * This is stored in the per-cpu log cpustate.
  */
