@@ -296,7 +296,7 @@ static bool trans_slti(DisasContext *ctx, arg_slti *a)
 
         if (ctx->base.is_jmp != DISAS_NEXT) {
             gen_update_cpu_pc(ctx->pc_succ_insn);
-            exit_tb(ctx);
+            tcg_gen_exit_tb(NULL, 0);
             return true;
         }
     }
@@ -480,7 +480,7 @@ static bool trans_fence_i(DisasContext *ctx, arg_fence_i *a)
      * however we need to end the translation block
      */
     gen_update_cpu_pc(ctx->pc_succ_insn);
-    exit_tb(ctx);
+    tcg_gen_exit_tb(NULL, 0);
     ctx->base.is_jmp = DISAS_NORETURN;
     return true;
 }
@@ -489,7 +489,7 @@ static bool do_csr_post(DisasContext *ctx)
 {
     /* We may have changed important cpu state -- exit to main loop. */
     gen_update_cpu_pc(ctx->pc_succ_insn);
-    exit_tb(ctx);
+    tcg_gen_exit_tb(NULL, 0);
     ctx->base.is_jmp = DISAS_NORETURN;
     return true;
 }

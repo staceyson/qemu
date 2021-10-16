@@ -176,31 +176,6 @@ static void generate_exception_mtval(DisasContext *ctx, int excp)
     ctx->base.is_jmp = DISAS_NORETURN;
 }
 
-static void gen_exception_debug(void)
-{
-    gen_helper_raise_exception(cpu_env, tcg_constant_i32(EXCP_DEBUG));
-}
-
-/* Wrapper around tcg_gen_exit_tb that handles single stepping */
-static void exit_tb(DisasContext *ctx)
-{
-    if (ctx->base.singlestep_enabled) {
-        gen_exception_debug();
-    } else {
-        tcg_gen_exit_tb(NULL, 0);
-    }
-}
-
-/* Wrapper around tcg_gen_lookup_and_goto_ptr that handles single stepping */
-static void lookup_and_goto_ptr(DisasContext *ctx)
-{
-    if (ctx->base.singlestep_enabled) {
-        gen_exception_debug();
-    } else {
-        tcg_gen_lookup_and_goto_ptr();
-    }
-}
-
 static void gen_exception_illegal(DisasContext *ctx)
 {
     generate_exception(ctx, RISCV_EXCP_ILLEGAL_INST);
@@ -224,7 +199,7 @@ static void gen_goto_tb(DisasContext *ctx, int n, target_ulong dest,
         tcg_gen_exit_tb(ctx->base.tb, n);
     } else {
         gen_update_cpu_pc(dest);
-        lookup_and_goto_ptr(ctx);
+        tcg_gen_lookup_and_goto_ptr();
     }
 }
 
@@ -415,7 +390,7 @@ static void gen_jalr(DisasContext *ctx, int rd, int rs1, target_ulong imm)
     gen_set_gpr_const(ctx, rd, ctx->pc_succ_insn - pcc_reloc(ctx));
 
     /* No chaining with JALR. */
-    lookup_and_goto_ptr(ctx);
+    tcg_gen_lookup_and_goto_ptr();
 
     if (misaligned) {
         gen_set_label(misaligned);

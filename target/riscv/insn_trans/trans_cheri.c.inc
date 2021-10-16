@@ -227,7 +227,7 @@ static bool trans_cspecialrw(DisasContext *ctx, arg_cspecialrw *a)
             // since we cache DDC properties in the flags to optimize out
             // bounds/permission checks.
             gen_update_cpu_pc(ctx->pc_succ_insn);
-            exit_tb(ctx);
+            tcg_gen_exit_tb(NULL, 0);
             ctx->base.is_jmp = DISAS_NORETURN;
         }
         return true;
@@ -317,7 +317,7 @@ static void gen_cjalr(DisasContext *ctx, int rd, int rs1, target_ulong imm)
     tcg_temp_free_i32(source_regnum);
     tcg_temp_free_i32(dest_regnum);
 
-    lookup_and_goto_ptr(ctx);
+    tcg_gen_lookup_and_goto_ptr();
     // PC has been updated -> exit translation block
     ctx->base.is_jmp = DISAS_NORETURN;
 }
@@ -342,7 +342,7 @@ static inline bool trans_cinvoke(DisasContext *ctx, arg_cinvoke *a)
     tcg_temp_free_i32(code_regnum);
     tcg_temp_free_i32(data_regnum);
 
-    lookup_and_goto_ptr(ctx);
+    tcg_gen_lookup_and_goto_ptr();
     // PC has been updated -> exit translation block
     ctx->base.is_jmp = DISAS_NORETURN;
     return true;
