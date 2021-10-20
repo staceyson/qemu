@@ -50,6 +50,7 @@ namespace cheri
  * 4. Each new compartment ID gets allocated a new perfetto::CheriCompartmentTrack.
  *    Note that compartment tracks are not associated to a single thread, instead
  *    multiple threads may record events there.
+ * 5. TODO: The context shoud include information on the EL and address space
  */
 class guest_context_tracker
 {
