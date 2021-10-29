@@ -25,8 +25,10 @@ static inline bool gen_lr_impl(DisasContext *ctx, TCGv_cap_checked_ptr addr,
     if (a->rl) {
         tcg_gen_mb(TCG_MO_ALL | TCG_BAR_STRL);
     }
+
     cheri_debug_assert((mop & MO_ALIGN) && "load-reserved must be aligned");
     tcg_gen_qemu_ld_tl_with_checked_addr(load_val, addr, ctx->mem_idx, mop);
+
     if (a->aq) {
         tcg_gen_mb(TCG_MO_ALL | TCG_BAR_LDAQ);
     }

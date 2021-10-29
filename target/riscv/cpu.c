@@ -316,6 +316,13 @@ static void riscv_cpu_dump_state(CPUState *cs, FILE *f, int flags)
             CSR_MSCRATCH,
             CSR_SSCRATCH,
             CSR_SATP,
+            CSR_MMTE,
+            CSR_UPMBASE,
+            CSR_UPMMASK,
+            CSR_SPMBASE,
+            CSR_SPMMASK,
+            CSR_MPMBASE,
+            CSR_MPMMASK,
         };
 
         for (int i = 0; i < ARRAY_SIZE(dump_csrs); ++i) {
@@ -719,6 +726,8 @@ static void riscv_cpu_reset(DeviceState *dev)
     }
     env->mcause = 0;
     env->two_stage_lookup = false;
+    /* mmte is supposed to have pm.current hardwired to 1 */
+    env->mmte |= (PM_EXT_INITIAL | MMTE_M_PM_CURRENT);
 #endif
 
     cs->exception_index = RISCV_EXCP_NONE;
@@ -949,6 +958,11 @@ static void riscv_cpu_realize(DeviceState *dev, Error **errp)
             }
             set_vext_version(env, vext_version);
         }
+
+        if (cpu->cfg.ext_j) {
+            ext |= RVJ;
+        }
+
 #ifdef TARGET_CHERI
         if (cpu->cfg.ext_cheri) {
             // Non-standard extensions present
@@ -1040,6 +1054,7 @@ static Property riscv_cpu_properties[] = {
     DEFINE_PROP_BOOL("x-zbc", RISCVCPU, cfg.ext_zbc, false),
     DEFINE_PROP_BOOL("x-zbs", RISCVCPU, cfg.ext_zbs, false),
     DEFINE_PROP_BOOL("x-h", RISCVCPU, cfg.ext_h, false),
+    DEFINE_PROP_BOOL("x-j", RISCVCPU, cfg.ext_j, false),
     DEFINE_PROP_BOOL("x-v", RISCVCPU, cfg.ext_v, false),
 #ifdef TARGET_CHERI
     DEFINE_PROP_BOOL("Xcheri", RISCVCPU, cfg.ext_cheri, true),

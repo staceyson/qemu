@@ -150,6 +150,7 @@ static bool gen_load(DisasContext *ctx, arg_lb *a, MemOp memop)
         tcg_gen_addi_tl(temp, addr, a->imm);
         addr = temp;
     }
+    addr = gen_pm_adjust_address(ctx, addr);
 
     gen_ddc_interposed_ld_tl(ctx, dest, /* Update addr in-place */ NULL, addr,
                              ctx->mem_idx, memop);
@@ -199,6 +200,7 @@ static bool gen_store(DisasContext *ctx, arg_sb *a, MemOp memop)
         tcg_gen_addi_tl(temp, addr, a->imm);
         addr = temp;
     }
+    addr = gen_pm_adjust_address(ctx, addr);
 
     gen_ddc_interposed_st_tl(ctx, data, /* Update addr in-place */ NULL, addr,
                              ctx->mem_idx, memop);

@@ -47,6 +47,9 @@ static TCGv cpu_vl;
 static TCGv_i64 cpu_fpr[32]; /* assume F and D extensions */
 static TCGv_cap_checked_ptr load_res;
 static TCGv load_val;
+/* globals for PM CSRs */
+static TCGv pm_mask[4];
+static TCGv pm_base[4];
 
 #include "exec/gen-icount.h"
 
@@ -98,6 +101,10 @@ typedef struct DisasContext {
     TCGv zero;
     /* Space for 3 operands plus 1 extra for address computation. */
     TCGv temp[4];
+    /* PointerMasking extension */
+    bool pm_enabled;
+    TCGv pm_mask;
+    TCGv pm_base;
 } DisasContext;
 
 #ifdef CONFIG_DEBUG_TCG
@@ -424,6 +431,23 @@ static void gen_jalr(DisasContext *ctx, int rd, int rs1, target_ulong imm)
     ctx->base.is_jmp = DISAS_NORETURN;
 
     tcg_temp_free(t0);
+}
+
+/*
+ * Generates address adjustment for PointerMasking
+ */
+static TCGv gen_pm_adjust_address(DisasContext *s, TCGv src)
+{
+    TCGv temp;
+    if (!s->pm_enabled) {
+        /* Load unmodified address */
+        return src;
+    } else {
+        temp = temp_new(s);
+        tcg_gen_andc_tl(temp, src, s->pm_mask);
+        tcg_gen_or_tl(temp, temp, s->pm_base);
+        return temp;
+    }
 }
 
 #ifndef CONFIG_USER_ONLY
@@ -776,6 +800,7 @@ static inline TCGv_cap_checked_ptr _get_capmode_dependent_addr(
 {
     TCGv_cap_checked_ptr result = tcg_temp_new_cap_checked();
 #ifdef TARGET_CHERI
+    // XXX-AM: Unsupported pointer masking extensions
     if (ctx->capmode) {
         gen_check_cap(result, reg_num, regoffs, mop);
     } else {
@@ -784,6 +809,7 @@ static inline TCGv_cap_checked_ptr _get_capmode_dependent_addr(
     }
 #else
     gen_get_gpr(ctx, result, reg_num);
+    result = gen_pm_adjust_address(ctx, result);
     if (!__builtin_constant_p(regoffs) || regoffs != 0) {
         tcg_gen_addi_tl(result, result, regoffs);
     }
@@ -923,6 +949,10 @@ static void riscv_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     ctx->cs = cs;
     ctx->ntemp = 0;
     memset(ctx->temp, 0, sizeof(ctx->temp));
+    ctx->pm_enabled = FIELD_EX32(tb_flags, TB_FLAGS, PM_ENABLED);
+    int priv = tb_flags & TB_FLAGS_PRIV_MMU_MASK;
+    ctx->pm_mask = pm_mask[priv];
+    ctx->pm_base = pm_base[priv];
 
     ctx->zero = tcg_constant_tl(0);
 }
@@ -1092,6 +1122,21 @@ void riscv_translate_init(void)
         cpu_env, offsetof(CPURISCVState, load_res), "load_res");
     load_val = tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, load_val),
                              "load_val");
+#ifndef CONFIG_USER_ONLY
+    /* Assign PM CSRs to tcg globals */
+    pm_mask[PRV_U] =
+      tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, upmmask), "upmmask");
+    pm_base[PRV_U] =
+      tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, upmbase), "upmbase");
+    pm_mask[PRV_S] =
+      tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, spmmask), "spmmask");
+    pm_base[PRV_S] =
+      tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, spmbase), "spmbase");
+    pm_mask[PRV_M] =
+      tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, mpmmask), "mpmmask");
+    pm_base[PRV_M] =
+      tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, mpmbase), "mpmbase");
+#endif
 }
 
 void gen_cheri_break_loadlink(TCGv_cap_checked_ptr out_addr)

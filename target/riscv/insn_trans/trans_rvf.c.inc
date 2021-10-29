@@ -53,6 +53,7 @@ static bool trans_fsw(DisasContext *ctx, arg_fsw *a)
                                           mop);
 
     tcg_temp_free_cap_checked(addr);
+
     return true;
 }
 
