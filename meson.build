@@ -2483,6 +2483,7 @@ if have_system
     'hw/s390x',
     'hw/scsi',
     'hw/sd',
+    'hw/sh4',
     'hw/sparc',
     'hw/sparc64',
     'hw/ssi',
