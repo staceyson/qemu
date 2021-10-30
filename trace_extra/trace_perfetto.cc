@@ -80,6 +80,12 @@ struct perfetto_backend_data
     // Per-CPU aggregate statistics
     cheri::qemu_stats stats_;
     cheri::guest_context_tracker ctx_tracker_;
+    /*
+     * Cached copy of the logging activation status.
+     * It is easier to keep a cached copy here than exposing the loglevel_active
+     * flag to the C++ interface.
+     */
+    bool loglevel_active_;
 
     perfetto_backend_data(int cpu_id) :
         ctrl_track_(perfetto::Track::Global(cheri::gen_track_uuid())),
@@ -158,14 +164,6 @@ void perfetto_tracing_stop(void)
     session->StopBlocking();
 }
 
-perfetto::protos::pbzero::ModeSwitch
-qemu_cpu_mode_to_trace(qemu_log_instr_cpu_mode_t mode)
-{
-    // NOTE: We rely on the fact that the protobuf enum ModeSwitch
-    // uses the same numbering as qemu_log_instr_cpu_mode_t
-    return static_cast<perfetto::protos::pbzero::ModeSwitch>(mode);
-}
-
 void
 trace_cap_register(perfetto::protos::pbzero::Capability *cap,
                    cap_register_handle chandle)
@@ -212,9 +210,18 @@ process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
             }
         } else if (evt->id == LOG_EVENT_CTX_UPDATE) {
             // Dump the stats for the current context to the right context track
-            data->stats_.flush(data->ctx_tracker_.get_ctx_track());
+            data->stats_.pause(data->ctx_tracker_.get_ctx_track(), perfetto_log_entry_pc(entry));
             data->ctx_tracker_.context_update(&evt->ctx_update);
+            data->stats_.unpause(data->ctx_tracker_.get_ctx_track(), perfetto_log_entry_pc(entry));
         }
+    }
+    if (perfetto_log_entry_flags(entry) & LI_FLAG_MODE_SWITCH) {
+        auto mode = cheri::qemu_cpu_mode_to_trace(perfetto_log_entry_next_cpu_mode(entry));
+        // XXX-AM: consider making the mode switch an event, possibly with its own separate pc signaling
+        // the PC of the next instruction we are landing to?
+        data->stats_.pause(data->ctx_tracker_.get_ctx_track(), perfetto_log_entry_pc(entry));
+        data->ctx_tracker_.mode_update(mode);
+        data->stats_.unpause(data->ctx_tracker_.get_ctx_track(), perfetto_log_entry_pc(entry));
     }
 
     /*
@@ -322,7 +329,7 @@ process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
                 trap->set_trap_number(perfetto_log_entry_intr_code(entry));
             }
             if (flags & LI_FLAG_MODE_SWITCH) {
-                auto mode = qemu_cpu_mode_to_trace(perfetto_log_entry_next_cpu_mode(entry));
+                auto mode = cheri::qemu_cpu_mode_to_trace(perfetto_log_entry_next_cpu_mode(entry));
                 instr->set_mode(mode);
             }
         });

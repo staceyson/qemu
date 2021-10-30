@@ -149,6 +149,13 @@ static inline void emit_start_event(cpu_log_entry_t *entry, target_ulong pc)
     event.state.pc = pc;
     /* Start events always have incomplete instruction data */
     entry->flags &= ~LI_FLAG_HAS_INSTR_DATA;
+    /*
+     * Also update PC to the one given in the start event.
+     * This ensures that the pc field is always correct, even on the first
+     * incomplete entry of the trace, where the start trigger occurs.
+     * XXX-AM: Does this mean that we can do away with the state.pc field?
+     */
+    entry->pc = pc;
 
     g_array_append_val(entry->events, event);
 }

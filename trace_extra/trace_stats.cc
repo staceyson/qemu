@@ -50,7 +50,7 @@ void qemu_stats::flush(perfetto::Track &track)
                         [&](perfetto::EventContext ctx) {
                             auto *qemu_arg = ctx.event()->set_qemu();
                             auto *hist = qemu_arg->set_histogram();
-                            for (const auto &keyval : bb_hit_map) {
+                            for (const auto &keyval : bb_hit_map_) {
                                 auto &range = keyval.first;
                                 auto *bucket = hist->add_bucket();
                                 bucket->set_start(range.lower());
@@ -63,7 +63,7 @@ void qemu_stats::flush(perfetto::Track &track)
                         [&](perfetto::EventContext ctx) {
                             auto *qemu_arg = ctx.event()->set_qemu();
                             auto *hist = qemu_arg->set_histogram();
-                            for (const auto &keyval : branch_map) {
+                            for (const auto &keyval : branch_map_) {
                                 auto *bucket = hist->add_bucket();
                                 bucket->set_start(keyval.first);
                                 bucket->set_value(keyval.second);
@@ -75,13 +75,16 @@ void qemu_stats::flush(perfetto::Track &track)
 
 void qemu_stats::pause(perfetto::Track &track, uint64_t pc)
 {
-    /*
-     * Treat this as the end of the block, otherwise the
-     * current PC slice will be lost.
-     */
-    bb_hit_map +=
-        std::make_pair(addr_range::right_open(pc_range_start, pc), icount);
-    pc_range_start = last_pc = icount = 0;
+    if (paused_)
+        return;
+    paused_ = true;
+    assert(pc_range_start_ != 0 && "PC bb start was not updated");
+    assert(pc != 0 && "pause PC can not be zero");
+    /* Treat this as the end of the block, otherwise the current PC slice will
+     * be lost. */
+    bb_hit_map_ +=
+        std::make_pair(addr_range::right_open(pc_range_start_, pc), icount_);
+    pc_range_start_ = last_pc_ = next_instr_pc_ = icount_ = 0;
     /*
      * Whenever we pause tracing, we need to sync the stats to trace,
      * otherwise we may charge the wrong context if tracing
@@ -92,16 +95,20 @@ void qemu_stats::pause(perfetto::Track &track, uint64_t pc)
 
 void qemu_stats::unpause(perfetto::Track &track, uint64_t pc)
 {
+    if (!paused_)
+        return;
+    paused_ = false;
     /* Reset the pc-tracking state */
-    pc_range_start = last_pc = pc;
+    pc_range_start_ = last_pc_ = pc;
+    next_instr_pc_ = -1;
     /* unpause will be called on the first instruction to be traced? */
-    icount = 1; // Unpause is called for the first instruction being traced
+    icount_ = 1; // Unpause is called for the first instruction being traced
 }
 
 void qemu_stats::clear()
 {
-    bb_hit_map.clear();
-    branch_map.clear();
+    bb_hit_map_.clear();
+    branch_map_.clear();
 }
 
 void qemu_stats::process_instr(perfetto::Track &ctx_track,
@@ -109,18 +116,23 @@ void qemu_stats::process_instr(perfetto::Track &ctx_track,
 {
     uint64_t pc = perfetto_log_entry_pc(entry);
     int size = perfetto_log_entry_insn_size(entry);
-    if (pc - last_pc > size) {
+    // When unpausing: accept anything as a next instruction when next_instr_pc
+    // == -1
+    if (pc != next_instr_pc_ && next_instr_pc_ != -1) {
         // presume we are branching
-        bb_hit_map += std::make_pair(
-            addr_range::right_open(pc_range_start, last_pc), icount);
-        pc_range_start = pc;
-        icount =
+        assert(pc_range_start_ != 0 && "PC bb start was not updated");
+        assert(last_pc_ != 0 && "process last_pc can not be zero");
+        bb_hit_map_ += std::make_pair(
+            addr_range::right_open(pc_range_start_, last_pc_), icount_);
+        pc_range_start_ = pc;
+        icount_ =
             1; // Reset icount triggered on the first instruction of the next BB
-        branch_map[pc] += 1;
+        branch_map_[pc] += 1;
     } else {
-        icount += 1;
+        icount_ += 1;
     }
-    last_pc = pc;
+    next_instr_pc_ = pc + size;
+    last_pc_ = pc;
 }
 
 } // namespace cheri

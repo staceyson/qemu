@@ -777,6 +777,30 @@ static inline const char *cpu_get_mode_name(qemu_log_instr_cpu_mode_t mode)
         return riscv_cpu_mode_names[mode];
     return "<invalid>";
 }
+
+/*
+ * Currently this is not required by the instruction logging backend, it
+ * is used internally in the target to get the correct code for the mode.
+ */
+static inline qemu_log_instr_cpu_mode_t cpu_priv_to_mode(target_ulong priv)
+{
+    qemu_log_instr_cpu_mode_t mode;
+
+    switch (priv) {
+    case PRV_M:
+        mode = RISCV_LOG_INSTR_CPU_M;
+        break;
+    case PRV_S:
+        mode = RISCV_LOG_INSTR_CPU_S;
+        break;
+    case PRV_H:
+        mode = RISCV_LOG_INSTR_CPU_H;
+        break;
+    default:
+        mode = RISCV_LOG_INSTR_CPU_U;
+    }
+    return mode;
+}
 #endif
 
 int riscv_csrrw(CPURISCVState *env, int csrno, target_ulong *ret_value,

@@ -340,22 +340,8 @@ void riscv_cpu_set_mode(CPURISCVState *env, target_ulong newpriv)
     env->load_res = -1;
 
 #ifdef CONFIG_TCG_LOG_INSTR
-    qemu_log_instr_cpu_mode_t mode;
-
-    switch (newpriv) {
-    case PRV_M:
-        mode = RISCV_LOG_INSTR_CPU_M;
-        break;
-    case PRV_S:
-        mode = RISCV_LOG_INSTR_CPU_S;
-        break;
-    case PRV_H:
-        mode = RISCV_LOG_INSTR_CPU_H;
-        break;
-    default:
-        mode = RISCV_LOG_INSTR_CPU_U;
-    }
-    qemu_log_instr_mode_switch(env, mode, cpu_get_recent_pc(env));
+    qemu_log_instr_mode_switch(env, cpu_priv_to_mode(newpriv),
+        cpu_get_recent_pc(env));
 #endif
 }
 

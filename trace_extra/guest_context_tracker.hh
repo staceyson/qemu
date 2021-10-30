@@ -35,6 +35,29 @@
 
 namespace cheri
 {
+
+struct qemu_context_track : public perfetto::Track {
+
+    using cpu_mode_type = perfetto::protos::pbzero::ModeSwitch;
+    /* (pid, tid, cid, mode) */
+    using qemu_ctx_id = std::tuple<uint64_t, uint64_t, uint64_t, cpu_mode_type>;
+
+    const uint64_t pid;
+    const uint64_t tid;
+    const uint64_t cid;
+    const cpu_mode_type mode;
+
+    static std::shared_ptr<qemu_context_track>
+    make_context_track(qemu_ctx_id key);
+
+    qemu_ctx_id get_id() const;
+
+    perfetto::protos::gen::TrackDescriptor Serialize() const;
+
+    qemu_context_track(qemu_ctx_id key);
+    ~qemu_context_track();
+};
+
 /*
  * Track current guest context associated to a CPU.
  * This allows to charge events to the correct context by recording
@@ -45,22 +68,25 @@ namespace cheri
  *    or where the context is not relevant.
  * 2. Each new process in the system gets allocated a new perfetto::ProcessTrack
  *    TODO: Currently there is no way to notify when the PID is discarded.
- * 3. Each new thread in the system gets allocated a new perfetto::ThreadTrack and
- *    the corresponding process as parent.
- * 4. Each new compartment ID gets allocated a new perfetto::CheriCompartmentTrack.
- *    Note that compartment tracks are not associated to a single thread, instead
- *    multiple threads may record events there.
+ * 3. Each new thread in the system gets allocated a new perfetto::ThreadTrack
+ * and the corresponding process as parent.
+ * 4. Each new compartment ID gets allocated a new
+ * perfetto::CheriCompartmentTrack. Note that compartment tracks are not
+ * associated to a single thread, instead multiple threads may record events
+ * there.
  * 5. TODO: The context shoud include information on the EL and address space
  */
 class guest_context_tracker
 {
     perfetto::Track cpu_track_;
-    std::shared_ptr<perfetto::Track> ctx_track_;
+    std::shared_ptr<qemu_context_track> ctx_track_;
+
   public:
     guest_context_tracker(int cpu_id);
     void context_update(const log_event_ctx_update_t *evt);
-    perfetto::Track& get_cpu_track();
-    perfetto::Track& get_ctx_track();
+    void mode_update(perfetto::protos::pbzero::ModeSwitch new_mode);
+    perfetto::Track &get_cpu_track();
+    perfetto::Track &get_ctx_track();
 };
 
 /*
@@ -70,4 +96,7 @@ class guest_context_tracker
  */
 unsigned long gen_track_uuid();
 
-} /* cheri */
+perfetto::protos::pbzero::ModeSwitch
+qemu_cpu_mode_to_trace(qemu_log_instr_cpu_mode_t mode);
+
+} // namespace cheri

@@ -44,22 +44,25 @@ class qemu_stats
     /*
      * Histogram of basic-block hit during tracing.
      */
-    boost::icl::interval_map<uint64_t, uint64_t> bb_hit_map;
+    boost::icl::interval_map<uint64_t, uint64_t> bb_hit_map_;
     /*
      * Histogram of branch instruction addresses.
      * Post-processing must be used to distinguish between function
      * calls and conditional branches.
      */
-    std::map<uint64_t, uint64_t> branch_map;
+    std::map<uint64_t, uint64_t> branch_map_;
     /*
      *  PC-tracking info to detect branches.
      */
-    uint64_t last_pc;
-    uint64_t pc_range_start;
-    uint64_t icount;
+    uint64_t last_pc_;
+    uint64_t next_instr_pc_;
+    uint64_t pc_range_start_;
+    uint64_t icount_;
+    /* Protect against double pause() calls */
+    bool paused_;
 
   public:
-    qemu_stats() : last_pc(0), pc_range_start(0), icount(0) {}
+    qemu_stats() : last_pc_(0), pc_range_start_(0), icount_(0), paused_(true) {}
     void process_instr(perfetto::Track &track, cpu_log_entry_handle entry);
     void pause(perfetto::Track &track, uint64_t pc);
     void unpause(perfetto::Track &track, uint64_t pc);

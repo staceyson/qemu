@@ -114,17 +114,25 @@ typedef enum {
     /*
      * Switch context from the current to the new (proc, thread, compartment) ID
      */
-    LOG_EVENT_CTX_OP_SWITCH = 1
+    LOG_EVENT_CTX_OP_SWITCH = 1,
+    /*
+     * Same as LOG_EVENT_CTX_OP_SWITCH but should bypass tracing activation
+     * status, Meaning that these events will reach the backend even when
+     * tracing is off. This is useful setup the correct context identifier
+     * before switching on tracing.
+     */
+    LOG_EVENT_CTX_OP_SETUP = 2
 } log_event_ctx_update_op_t;
 
 /*
  * Context update event.
  */
 typedef struct {
-    log_event_ctx_update_op_t op; /* What changed */
-    uint64_t pid;                 /* Process ID */
-    uint64_t tid;                 /* Thread ID */
-    uint64_t cid;                 /* Compartment ID */
+    log_event_ctx_update_op_t op;   /* What changed */
+    uint64_t pid;                   /* Process ID */
+    uint64_t tid;                   /* Thread ID */
+    uint64_t cid;                   /* Compartment ID */
+    qemu_log_instr_cpu_mode_t mode; /* CPU mode */
 } log_event_ctx_update_t;
 
 /*
