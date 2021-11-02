@@ -29,9 +29,6 @@ tx79_ss.add(when: 'TARGET_CHERI', if_false: files('tx79_translate.c'))
 mips_ss.add(when: 'TARGET_MIPS64', if_false: files('mxu_translate.c'))
 mips_ss.add_all(when: 'TARGET_MIPS64', if_true: [tx79_ss])
 
-if have_user
-  subdir('user')
-endif
 if have_system
   subdir('sysemu')
 endif
