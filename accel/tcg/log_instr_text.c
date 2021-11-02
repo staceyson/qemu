@@ -202,12 +202,13 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
             if (cpulog->loglevel == QEMU_LOG_INSTR_LOGLEVEL_USER) {
                 qemu_log(
                     "[%u:%u] %s user-mode only instruction logging @ %lx\n",
-                    env_cpu(env)->cpu_index, cpu_get_asid(env), log_state_op,
-                    event->state.pc);
+                    env_cpu(env)->cpu_index, cpu_get_asid(env, event->state.pc),
+                    log_state_op, event->state.pc);
             } else {
                 qemu_log("[%u:%u] %s instruction logging @ %lx\n",
-                         env_cpu(env)->cpu_index, cpu_get_asid(env),
-                         log_state_op, event->state.pc);
+                         env_cpu(env)->cpu_index,
+                         cpu_get_asid(env, event->state.pc), log_state_op,
+                         event->state.pc);
             }
             break;
         case LOG_EVENT_CTX_UPDATE:

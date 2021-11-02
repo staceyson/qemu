@@ -253,7 +253,7 @@ void qemu_log_instr_sync_buffers(void);
 /*
  * Global instruction logging hook from qemu tracing commands.
  */
-void qemu_log_instr_global_switch(bool request_stop);
+int qemu_log_instr_global_switch(int log_flags);
 
 /*
  * Update the ring buffer size.
