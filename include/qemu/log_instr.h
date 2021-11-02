@@ -168,7 +168,7 @@ static inline void qemu_log_instr_set_backend(qemu_log_instr_backend_t id)
     qemu_log_instr_backend = id;
 }
 
-static inline qemu_log_instr_backend_t qemu_log_instr_get_backend()
+static inline qemu_log_instr_backend_t qemu_log_instr_get_backend(void)
 {
     return qemu_log_instr_backend;
 }
