@@ -78,7 +78,9 @@ void qemu_stats::pause(perfetto::Track &track, uint64_t pc)
     if (paused_)
         return;
     paused_ = true;
-    assert(pc_range_start_ != 0 && "PC bb start was not updated");
+    /* Nothing to flush */
+    if (pc_range_start_ == 0)
+        return;
     assert(pc != 0 && "pause PC can not be zero");
     /* Treat this as the end of the block, otherwise the current PC slice will
      * be lost. */
