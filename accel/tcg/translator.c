@@ -250,7 +250,7 @@ static inline void translator_maybe_page_protect(DisasContextBase *dcbase,
         if (do_swap) {                                                  \
             ret = swap_fn(ret);                                         \
         }                                                               \
-        plugin_insn_append(&ret, sizeof(ret));                          \
+        plugin_insn_append(pc, &ret, sizeof(ret));                      \
         return ret;                                                     \
     }
 
