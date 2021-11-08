@@ -77,8 +77,7 @@ struct perfetto_backend_data
 {
     // Per-CPU control track. This records tracing control events.
     perfetto::Track ctrl_track_;
-    // Per-CPU aggregate statistics
-    cheri::qemu_stats stats_;
+    // Tracker that resolves the current context scheduled on a CPU
     cheri::guest_context_tracker ctx_tracker_;
     /*
      * Cached copy of the logging activation status.
@@ -182,6 +181,8 @@ process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
 {
     int nevents = perfetto_log_entry_events(entry);
     bool have_startstop_event = false;
+    auto *curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
+    auto *curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
 
     /*
      * Note: LOG_EVENT_STATE events are emitted even when tracing is disabled.
@@ -193,15 +194,16 @@ process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
             switch (evt->state.next_state) {
                 case LOG_EVENT_STATE_FLUSH:
                     TRACE_EVENT_INSTANT("ctrl", "flush", data->ctrl_track_);
+                    data->ctx_tracker_.flush_all_ctx_data();
                     perfetto::TrackEvent::Flush();
                     break;
                 case LOG_EVENT_STATE_START:
-                    data->stats_.unpause(data->ctx_tracker_.get_ctx_track(), evt->state.pc);
+                    curr_ctx_data->stats.unpause(*curr_ctx_track, evt->state.pc);
                     TRACE_EVENT_BEGIN("ctrl", "tracing", data->ctrl_track_);
                     have_startstop_event = true;
                     break;
                 case LOG_EVENT_STATE_STOP:
-                    data->stats_.pause(data->ctx_tracker_.get_ctx_track(), evt->state.pc);
+                    curr_ctx_data->stats.pause(*curr_ctx_track, evt->state.pc);
                     TRACE_EVENT_END("ctrl", data->ctrl_track_);
                     have_startstop_event = true;
                     break;
@@ -209,19 +211,23 @@ process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
                     assert(false && "Invalid state event");
             }
         } else if (evt->id == LOG_EVENT_CTX_UPDATE) {
-            // Dump the stats for the current context to the right context track
-            data->stats_.pause(data->ctx_tracker_.get_ctx_track(), perfetto_log_entry_pc(entry));
+            // Swap current context.
+            curr_ctx_data->stats.pause(*curr_ctx_track, perfetto_log_entry_pc(entry));
             data->ctx_tracker_.context_update(&evt->ctx_update);
-            data->stats_.unpause(data->ctx_tracker_.get_ctx_track(), perfetto_log_entry_pc(entry));
+            curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
+            curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
+            curr_ctx_data->stats.unpause(*curr_ctx_track, perfetto_log_entry_pc(entry));
         }
     }
     if (perfetto_log_entry_flags(entry) & LI_FLAG_MODE_SWITCH) {
         auto mode = cheri::qemu_cpu_mode_to_trace(perfetto_log_entry_next_cpu_mode(entry));
         // XXX-AM: consider making the mode switch an event, possibly with its own separate pc signaling
         // the PC of the next instruction we are landing to?
-        data->stats_.pause(data->ctx_tracker_.get_ctx_track(), perfetto_log_entry_pc(entry));
+        curr_ctx_data->stats.pause(*curr_ctx_track, perfetto_log_entry_pc(entry));
         data->ctx_tracker_.mode_update(mode);
-        data->stats_.unpause(data->ctx_tracker_.get_ctx_track(), perfetto_log_entry_pc(entry));
+        curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
+        curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
+        curr_ctx_data->stats.unpause(*curr_ctx_track, perfetto_log_entry_pc(entry));
     }
 
     /*
@@ -230,7 +236,7 @@ process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
      * This avoids having to keep a shadow copy of the tracing state in the backend.
      */
     if (!have_startstop_event && (perfetto_log_entry_flags(entry) & LI_FLAG_HAS_INSTR_DATA) != 0)
-        data->stats_.process_instr(data->ctx_tracker_.get_ctx_track(), entry);
+        curr_ctx_data->stats.process_instr(*curr_ctx_track, entry);
 }
 
 void

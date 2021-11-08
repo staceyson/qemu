@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <map>
 #include <perfetto.h>
 #include <boost/icl/interval_map.hpp>
@@ -60,9 +61,15 @@ class qemu_stats
     uint64_t icount_;
     /* Protect against double pause() calls */
     bool paused_;
+    /* Time of last flush */
+    std::chrono::time_point<std::chrono::steady_clock> last_flush_time_;
 
   public:
-    qemu_stats() : last_pc_(0), pc_range_start_(0), icount_(0), paused_(true) {}
+    qemu_stats()
+        : last_pc_(0), pc_range_start_(0), icount_(0), paused_(true),
+          last_flush_time_(std::chrono::steady_clock::now())
+    {
+    }
     void process_instr(perfetto::Track &track, cpu_log_entry_handle entry);
     void pause(perfetto::Track &track, uint64_t pc);
     void unpause(perfetto::Track &track, uint64_t pc);

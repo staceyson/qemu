@@ -29,12 +29,23 @@
 #pragma once
 
 #include <memory>
+#include <iterator>
+#include <utility>
 #include <perfetto.h>
 #include "qemu/log_instr.h"
 #include "exec/log_instr_perfetto.h"
+#include "trace_extra/trace_stats.hh"
 
 namespace cheri
 {
+
+/*
+ * Per-context data.
+ * This is allocated and switched together with the context track.
+ */
+struct qemu_context_data {
+    qemu_stats stats;
+};
 
 struct qemu_context_track : public perfetto::Track {
 
@@ -46,6 +57,7 @@ struct qemu_context_track : public perfetto::Track {
     const uint64_t tid;
     const uint64_t cid;
     const cpu_mode_type mode;
+    qemu_context_data ctx_data;
 
     static std::shared_ptr<qemu_context_track>
     make_context_track(qemu_ctx_id key);
@@ -64,29 +76,40 @@ struct qemu_context_track : public perfetto::Track {
  * what is currently active on a CPU.
  * There is one guest_context_tracker per virtual CPU.
  * We manage the following tracks for each CPU:
- * 1. A global CPU N track, for events charged to a CPU from an unknown context
+ * - A global CPU N track, for events charged to a CPU from an unknown context
  *    or where the context is not relevant.
- * 2. Each new process in the system gets allocated a new perfetto::ProcessTrack
+ * - Each new process in the system gets allocated a new perfetto::ProcessTrack
  *    TODO: Currently there is no way to notify when the PID is discarded.
- * 3. Each new thread in the system gets allocated a new perfetto::ThreadTrack
+ * - Each new thread in the system gets allocated a new perfetto::ThreadTrack
  * and the corresponding process as parent.
- * 4. Each new compartment ID gets allocated a new
+ * - TODO Each new compartment ID gets allocated a new
  * perfetto::CheriCompartmentTrack. Note that compartment tracks are not
  * associated to a single thread, instead multiple threads may record events
- * there.
- * 5. TODO: The context shoud include information on the EL and address space
+ * there. Each new context can have associated data that is charged to that
+ * context and only emitted to the track periodically. This is to avoid
+ * generating too much data if it can be aggregated. Other options could be to
+ * avoid the track subsystem and use a custom perfetto data source with
+ * respective changes in the trace processor.
+ * TODO:
+ *  - The context shoud include information on address space
  */
 class guest_context_tracker
 {
+    /* CPU track for events not assigned (or assignable) to a single context */
     perfetto::Track cpu_track_;
+    /* context data for the CPU track */
+    qemu_context_data cpu_ctx_data_;
+    /* Currently active context track */
     std::shared_ptr<qemu_context_track> ctx_track_;
 
   public:
     guest_context_tracker(int cpu_id);
     void context_update(const log_event_ctx_update_t *evt);
     void mode_update(perfetto::protos::pbzero::ModeSwitch new_mode);
+    void flush_all_ctx_data();
     perfetto::Track &get_cpu_track();
     perfetto::Track &get_ctx_track();
+    qemu_context_data &get_ctx_data();
 };
 
 /*

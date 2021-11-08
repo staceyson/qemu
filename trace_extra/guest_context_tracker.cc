@@ -34,10 +34,8 @@
 namespace
 {
 /*
- * Dynamically created tracks.
- * Here we do not commit to a hierarchical model of process/thread, as context
- * events are guest-driven. Instead we defer any hierarchical interpretation of
- * the context identifier to post-processing.
+ * Dynamically created tracks and track data.
+ * The tracks lock protects both tracks and ctx_data.
  */
 std::mutex tracks_lock;
 std::map<cheri::qemu_context_track::qemu_ctx_id,
@@ -194,6 +192,16 @@ void guest_context_tracker::context_update(const log_event_ctx_update_t *evt)
     ctx_track_ = track;
 }
 
+void guest_context_tracker::flush_all_ctx_data()
+{
+    /* Flush per-CPU stats */
+    cpu_ctx_data_.stats.flush(cpu_track_);
+    for (auto &id_and_track : tracks) {
+        qemu_context_data &ctx_data = id_and_track.second->ctx_data;
+        ctx_data.stats.flush(*id_and_track.second);
+    }
+}
+
 perfetto::Track &guest_context_tracker::get_cpu_track()
 {
     return cpu_track_;
@@ -205,6 +213,14 @@ perfetto::Track &guest_context_tracker::get_ctx_track()
         return *ctx_track_;
     else
         return cpu_track_;
+}
+
+qemu_context_data &guest_context_tracker::get_ctx_data()
+{
+    if (ctx_track_)
+        return ctx_track_->ctx_data;
+    else
+        return cpu_ctx_data_;
 }
 
 } // namespace cheri

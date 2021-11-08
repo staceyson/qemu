@@ -31,6 +31,7 @@
 #include "qemu/log_instr.h"
 #include "trace_extra/trace_stats.hh"
 
+using namespace std::chrono_literals;
 namespace icl = boost::icl;
 
 using addr_range = icl::interval<uint64_t>;
@@ -88,11 +89,17 @@ void qemu_stats::pause(perfetto::Track &track, uint64_t pc)
         std::make_pair(addr_range::right_open(pc_range_start_, pc), icount_);
     pc_range_start_ = last_pc_ = next_instr_pc_ = icount_ = 0;
     /*
-     * Whenever we pause tracing, we need to sync the stats to trace,
-     * otherwise we may charge the wrong context if tracing
-     * is restarted in another thread.
+     * Whenever we pause tracing, we may sync the stats to trace.
+     * This is to avoid having to dump packets too large into the trace, however
+     * we could get around this by just dumping the full stats only when a flush
+     * is triggered.
      */
-    flush(track);
+    auto now = std::chrono::steady_clock::now();
+    auto interval = now - last_flush_time_;
+    if (interval > 1s) {
+        last_flush_time_ = now;
+        flush(track);
+    }
 }
 
 void qemu_stats::unpause(perfetto::Track &track, uint64_t pc)
@@ -120,7 +127,7 @@ void qemu_stats::process_instr(perfetto::Track &ctx_track,
     int size = perfetto_log_entry_insn_size(entry);
     // When unpausing: accept anything as a next instruction when next_instr_pc
     // == -1
-    if (pc != next_instr_pc_ && next_instr_pc_ != -1) {
+    if (pc != next_instr_pc_ && next_instr_pc_ != -1UL) {
         // presume we are branching
         assert(pc_range_start_ != 0 && "PC bb start was not updated");
         assert(last_pc_ != 0 && "process last_pc can not be zero");
