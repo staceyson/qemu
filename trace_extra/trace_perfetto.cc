@@ -212,11 +212,14 @@ process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
             }
         } else if (evt->id == LOG_EVENT_CTX_UPDATE) {
             // Swap current context.
-            curr_ctx_data->stats.pause(*curr_ctx_track, perfetto_log_entry_pc(entry));
-            data->ctx_tracker_.context_update(&evt->ctx_update);
-            curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
-            curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
-            curr_ctx_data->stats.unpause(*curr_ctx_track, perfetto_log_entry_pc(entry));
+            if (evt->ctx_update.op == LOG_EVENT_CTX_OP_SETUP ||
+                evt->ctx_update.op == LOG_EVENT_CTX_OP_SWITCH) {
+                curr_ctx_data->stats.pause(*curr_ctx_track, perfetto_log_entry_pc(entry));
+                data->ctx_tracker_.context_update(&evt->ctx_update);
+                curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
+                curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
+                curr_ctx_data->stats.unpause(*curr_ctx_track, perfetto_log_entry_pc(entry));
+            }
         }
     }
     if (perfetto_log_entry_flags(entry) & LI_FLAG_MODE_SWITCH) {

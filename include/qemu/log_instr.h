@@ -121,7 +121,7 @@ typedef enum {
      * tracing is off. This is useful setup the correct context identifier
      * before switching on tracing.
      */
-    LOG_EVENT_CTX_OP_SETUP = 2
+    LOG_EVENT_CTX_OP_SETUP = 2,
 } log_event_ctx_update_op_t;
 
 /*
