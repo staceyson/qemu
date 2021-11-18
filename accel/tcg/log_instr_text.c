@@ -215,6 +215,7 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
             qemu_log("Context switch pid=0x%lx tid=0x%lx cid=0x%lx\n",
                      event->ctx_update.pid, event->ctx_update.tid,
                      event->ctx_update.cid);
+            break;
         default:
             assert(0 && "unknown event ID");
         }
