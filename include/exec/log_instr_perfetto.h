@@ -44,7 +44,7 @@
  * For each CPU we have the following tracks:
  * CPU N: track for generic CPU events, contains the following categories:
  *   - instructions: events related to the instruction stream
- *   - sched: scheduling events on the CPU (context switches)
+ *   - sched: scheduling events on the CPU or on context-track
  *   - trap: Contains interrupt and trap events with help from OS-driven events
  *   - ctrl: Tracing control events (e.g. when tracing is started and stopped)
  * Process/Thread/Compartment tracks:

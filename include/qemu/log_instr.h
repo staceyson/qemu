@@ -80,6 +80,13 @@ typedef enum {
 } qemu_log_instr_cpu_mode_t;
 
 /*
+ * XXX-AM: Consider using protobufs for log events so that they
+ * are already in a serialized format when they reach the
+ * perfetto backend.
+ * How this would affect other formats?
+ */
+
+/*
  * Instruction logging per-CPU log level
  */
 typedef enum {
