@@ -35,6 +35,8 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log_instr.h"
+#include "cpu.h"
 #include "exec/log_instr.h"
 #include "exec/log_instr_internal.h"
 #include "exec/log_instr_perfetto.h"
