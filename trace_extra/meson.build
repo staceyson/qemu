@@ -2,7 +2,7 @@
 qemutrace_ss = ss.source_set()
 
 if config_all.has_key('CONFIG_TCG_LOG_INSTR') and config_all.has_key('CONFIG_TRACE_PERFETTO')
-   qemutrace_ss.add(dependency('boost', modules: ['filesystem']))
+   qemutrace_ss.add(dependency('boost', modules: ['filesystem', 'system']))
 endif
 
 qemutrace_ss.add(when: ['CONFIG_TCG', 'CONFIG_TCG_LOG_INSTR', 'CONFIG_TRACE_PERFETTO'],
