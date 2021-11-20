@@ -56,7 +56,8 @@ PERFETTO_TRACK_EVENT_STATIC_STORAGE();
 
 namespace fs = boost::filesystem;
 
-namespace {
+namespace
+{
 
 /* Tracing session pointer */
 std::unique_ptr<perfetto::TracingSession> session;
@@ -73,8 +74,7 @@ std::unique_ptr<perfetto::Track> sched_track;
 /*
  * Private per-CPU state.
  */
-struct perfetto_backend_data
-{
+struct perfetto_backend_data {
     // Per-CPU control track. This records tracing control events.
     perfetto::Track ctrl_track_;
     // Tracker that resolves the current context scheduled on a CPU
@@ -86,9 +86,9 @@ struct perfetto_backend_data
      */
     bool loglevel_active_;
 
-    perfetto_backend_data(int cpu_id) :
-        ctrl_track_(perfetto::Track::Global(cheri::gen_track_uuid())),
-        ctx_tracker_(cpu_id)
+    perfetto_backend_data(int cpu_id)
+        : ctrl_track_(perfetto::Track::Global(cheri::gen_track_uuid())),
+          ctx_tracker_(cpu_id)
 
     {
         std::string track_name("CPU " + std::to_string(cpu_id) + " ctrl");
@@ -163,9 +163,8 @@ void perfetto_tracing_stop(void)
     session->StopBlocking();
 }
 
-void
-trace_cap_register(perfetto::protos::pbzero::Capability *cap,
-                   cap_register_handle chandle)
+void trace_cap_register(perfetto::protos::pbzero::Capability *cap,
+                        cap_register_handle chandle)
 {
     cap->set_valid(perfetto_cap_tag(chandle));
     cap->set_sealed(perfetto_cap_sealed(chandle));
@@ -176,8 +175,7 @@ trace_cap_register(perfetto::protos::pbzero::Capability *cap,
     cap->set_otype(perfetto_cap_otype(chandle));
 }
 
-void
-process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
+void process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
 {
     int nevents = perfetto_log_entry_events(entry);
     bool have_startstop_event = false;
@@ -192,81 +190,91 @@ process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
         log_event_t *evt = perfetto_log_event(entry, i);
         if (evt->id == LOG_EVENT_STATE) {
             switch (evt->state.next_state) {
-                case LOG_EVENT_STATE_FLUSH:
-                    TRACE_EVENT_INSTANT("ctrl", "flush", data->ctrl_track_);
-                    data->ctx_tracker_.flush_all_ctx_data();
-                    perfetto::TrackEvent::Flush();
-                    break;
-                case LOG_EVENT_STATE_START:
-                    curr_ctx_data->stats.unpause(*curr_ctx_track, evt->state.pc);
-                    TRACE_EVENT_BEGIN("ctrl", "tracing", data->ctrl_track_);
-                    have_startstop_event = true;
-                    break;
-                case LOG_EVENT_STATE_STOP:
-                    curr_ctx_data->stats.pause(*curr_ctx_track, evt->state.pc);
-                    TRACE_EVENT_END("ctrl", data->ctrl_track_);
-                    have_startstop_event = true;
-                    break;
-                default:
-                    assert(false && "Invalid state event");
+            case LOG_EVENT_STATE_FLUSH:
+                TRACE_EVENT_INSTANT("ctrl", "flush", data->ctrl_track_);
+                data->ctx_tracker_.flush_all_ctx_data();
+                perfetto::TrackEvent::Flush();
+                break;
+            case LOG_EVENT_STATE_START:
+                curr_ctx_data->stats.unpause(*curr_ctx_track, evt->state.pc);
+                TRACE_EVENT_BEGIN("ctrl", "tracing", data->ctrl_track_);
+                have_startstop_event = true;
+                break;
+            case LOG_EVENT_STATE_STOP:
+                curr_ctx_data->stats.pause(*curr_ctx_track, evt->state.pc);
+                TRACE_EVENT_END("ctrl", data->ctrl_track_);
+                have_startstop_event = true;
+                break;
+            default:
+                assert(false && "Invalid state event");
             }
         } else if (evt->id == LOG_EVENT_CTX_UPDATE) {
             // Swap current context.
             if (evt->ctx_update.op == LOG_EVENT_CTX_OP_SETUP ||
                 evt->ctx_update.op == LOG_EVENT_CTX_OP_SWITCH) {
-                curr_ctx_data->stats.pause(*curr_ctx_track, perfetto_log_entry_pc(entry));
+                curr_ctx_data->stats.pause(*curr_ctx_track,
+                                           perfetto_log_entry_pc(entry));
                 data->ctx_tracker_.context_update(&evt->ctx_update);
                 curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
                 curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
-                curr_ctx_data->stats.unpause(*curr_ctx_track, perfetto_log_entry_pc(entry));
+                curr_ctx_data->stats.unpause(*curr_ctx_track,
+                                             perfetto_log_entry_pc(entry));
             }
         }
     }
     if (perfetto_log_entry_flags(entry) & LI_FLAG_MODE_SWITCH) {
-        auto mode = cheri::qemu_cpu_mode_to_trace(perfetto_log_entry_next_cpu_mode(entry));
-        // XXX-AM: consider making the mode switch an event, possibly with its own separate pc signaling
-        // the PC of the next instruction we are landing to?
-        curr_ctx_data->stats.pause(*curr_ctx_track, perfetto_log_entry_pc(entry));
+        auto mode = cheri::qemu_cpu_mode_to_trace(
+            perfetto_log_entry_next_cpu_mode(entry));
+        // XXX-AM: consider making the mode switch an event, possibly with its
+        // own separate pc signaling the PC of the next instruction we are
+        // landing to?
+        curr_ctx_data->stats.pause(*curr_ctx_track,
+                                   perfetto_log_entry_pc(entry));
         data->ctx_tracker_.mode_update(mode);
         curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
         curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
-        curr_ctx_data->stats.unpause(*curr_ctx_track, perfetto_log_entry_pc(entry));
+        curr_ctx_data->stats.unpause(*curr_ctx_track,
+                                     perfetto_log_entry_pc(entry));
     }
 
     /*
-     * If we have instruction data, we assume that tracing is enabled and run extra
-     * stats gathering to track the executed instruction PC in the stats histograms.
-     * This avoids having to keep a shadow copy of the tracing state in the backend.
+     * If we have instruction data, we assume that tracing is enabled and run
+     * extra stats gathering to track the executed instruction PC in the stats
+     * histograms. This avoids having to keep a shadow copy of the tracing state
+     * in the backend.
      */
-    if (!have_startstop_event && (perfetto_log_entry_flags(entry) & LI_FLAG_HAS_INSTR_DATA) != 0)
+    if (!have_startstop_event &&
+        (perfetto_log_entry_flags(entry) & LI_FLAG_HAS_INSTR_DATA) != 0)
         curr_ctx_data->stats.process_instr(*curr_ctx_track, entry);
 }
 
-void
-process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
+void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
 {
     /*
-     * XXX-AM: instead of having one big instruction record, we may have different messages for
-     * optional parts of the instruction message, on the same track/category: e.g. mode swtich,
-     * interrupt information and modified registers?
+     * XXX-AM: instead of having one big instruction record, we may have
+     * different messages for optional parts of the instruction message, on the
+     * same track/category: e.g. mode swtich, interrupt information and modified
+     * registers?
      */
-    TRACE_EVENT_INSTANT("instructions", "stream", data->ctx_tracker_.get_ctx_track(),
+    TRACE_EVENT_INSTANT(
+        "instructions", "stream", data->ctx_tracker_.get_ctx_track(),
         [&](perfetto::EventContext ctx) {
             auto *qemu_arg = ctx.event()->set_qemu();
             auto *instr = qemu_arg->set_instr();
-            auto flags =  perfetto_log_entry_flags(entry);
+            auto flags = perfetto_log_entry_flags(entry);
 
             /*
              * Populate protobuf from internal qemu structure.
              * XXX-AM: It would be very nice if we could somehow skip this step
              * and have the qemu internal representation be protobuf-based, so
              * that here we only have to embed the qemu-specific packet
-             * into the track_event. Ideally this would save us all this copying around of
-             * the event data but I have no clue about the implications for the stability
-             * of the C/C++ protobuf-generated structures or whether we can embed the
-             * qemu portion of the packet already in the serialized wire-format
-             * (which should be stable by design).
-             * This can probably be done via protozero::Message::AppendScatteredBytes().
+             * into the track_event. Ideally this would save us all this copying
+             * around of the event data but I have no clue about the
+             * implications for the stability of the C/C++ protobuf-generated
+             * structures or whether we can embed the qemu portion of the packet
+             * already in the serialized wire-format (which should be stable by
+             * design). This can probably be done via
+             * protozero::Message::AppendScatteredBytes().
              */
             assert(flags & LI_FLAG_HAS_INSTR_DATA);
             const char *bytes = perfetto_log_entry_insn_bytes(entry);
@@ -274,11 +282,12 @@ process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
             int nitems;
             std::stringstream ss;
 
-            // XXX-AM: We can not use a bytes field in the protobuf because perfetto lacks
-            // support. This is slightly sad as this is an high-frequency event.
+            // XXX-AM: We can not use a bytes field in the protobuf because
+            // perfetto lacks support. This is slightly sad as this is an
+            // high-frequency event.
             for (int i = 0; i < size; i++) {
-                ss << std::hex << std::setw(2) << std::setfill('0') <<
-                        (static_cast<unsigned int>(bytes[i]) & 0xff) << " ";
+                ss << std::hex << std::setw(2) << std::setfill('0')
+                   << (static_cast<unsigned int>(bytes[i]) & 0xff) << " ";
             }
             instr->set_opcode(ss.str());
             instr->set_pc(perfetto_log_entry_pc(entry));
@@ -289,7 +298,8 @@ process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
                 auto *reginfo = instr->add_reg();
                 reginfo->set_name(perfetto_reg_info_name(entry, i));
                 if ((flags & LRI_CAP_REG) && (flags & LRI_HOLDS_CAP)) {
-                    cap_register_handle cap_handle = perfetto_reg_info_cap(entry, i);
+                    cap_register_handle cap_handle =
+                        perfetto_reg_info_cap(entry, i);
                     auto *capinfo = reginfo->set_cap_val();
                     trace_cap_register(capinfo, cap_handle);
                 } else {
@@ -302,25 +312,26 @@ process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
                 auto *meminfo = instr->add_mem();
                 meminfo->set_addr(perfetto_mem_info_addr(entry, i));
                 switch (flags) {
-                    case LMI_LD:
-                        meminfo->set_op(perfetto::protos::pbzero::MemInfo::LOAD);
-                        break;
-                    case LMI_LD | LMI_CAP:
-                        meminfo->set_op(perfetto::protos::pbzero::MemInfo::CLOAD);
-                        break;
-                    case LMI_ST:
-                        meminfo->set_op(perfetto::protos::pbzero::MemInfo::STORE);
-                        break;
-                    case LMI_ST | LMI_CAP:
-                        meminfo->set_op(perfetto::protos::pbzero::MemInfo::CSTORE);
-                        break;
-                    default:
-                        // XXX Notify error somehow?
-                        break;
+                case LMI_LD:
+                    meminfo->set_op(perfetto::protos::pbzero::MemInfo::LOAD);
+                    break;
+                case LMI_LD | LMI_CAP:
+                    meminfo->set_op(perfetto::protos::pbzero::MemInfo::CLOAD);
+                    break;
+                case LMI_ST:
+                    meminfo->set_op(perfetto::protos::pbzero::MemInfo::STORE);
+                    break;
+                case LMI_ST | LMI_CAP:
+                    meminfo->set_op(perfetto::protos::pbzero::MemInfo::CSTORE);
+                    break;
+                default:
+                    // XXX Notify error somehow?
+                    break;
                 }
                 if (flags & LMI_CAP) {
                     auto *capinfo = meminfo->set_cap_val();
-                    cap_register_handle cap_handle = perfetto_reg_info_cap(entry, i);
+                    cap_register_handle cap_handle =
+                        perfetto_reg_info_cap(entry, i);
                     trace_cap_register(capinfo, cap_handle);
                 } else {
                     meminfo->set_int_val(perfetto_mem_info_value(entry, i));
@@ -338,20 +349,22 @@ process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
                 trap->set_trap_number(perfetto_log_entry_intr_code(entry));
             }
             if (flags & LI_FLAG_MODE_SWITCH) {
-                auto mode = cheri::qemu_cpu_mode_to_trace(perfetto_log_entry_next_cpu_mode(entry));
+                auto mode = cheri::qemu_cpu_mode_to_trace(
+                    perfetto_log_entry_next_cpu_mode(entry));
                 instr->set_mode(mode);
             }
         });
 }
 
-} /* anonymous */
+} // namespace
 
 extern "C" void qemu_log_instr_perfetto_conf_logfile(const char *name)
 {
     logfile = name;
 }
 
-extern "C" void qemu_log_instr_perfetto_conf_categories(const char *category_str)
+extern "C" void
+qemu_log_instr_perfetto_conf_categories(const char *category_str)
 {
     std::string strspec(category_str);
     int pos;
@@ -378,9 +391,9 @@ extern "C" void perfetto_init_cpu(int cpu_index, void **backend_data)
         perfetto_start_tracing();
     });
 
-
-    // XXX-AM: The backend data is currently missing a cleanup hook, so it leaks.
-    // This is not a big issue as it should be live until the qemu process terminates.
+    // XXX-AM: The backend data is currently missing a cleanup hook, so it
+    // leaks. This is not a big issue as it should be live until the qemu
+    // process terminates.
     *backend_data = new perfetto_backend_data(cpu_index);
 }
 
@@ -394,7 +407,8 @@ extern "C" void perfetto_sync_cpu(void *backend_data)
     perfetto::TrackEvent::Flush();
 }
 
-extern "C" void perfetto_emit_instr(void *backend_data, cpu_log_entry_handle entry)
+extern "C" void perfetto_emit_instr(void *backend_data,
+                                    cpu_log_entry_handle entry)
 {
     auto *data = reinterpret_cast<perfetto_backend_data *>(backend_data);
     auto flags = perfetto_log_entry_flags(entry);
