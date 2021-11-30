@@ -33,13 +33,18 @@
 #pragma once
 
 #include <chrono>
-#include <map>
+#include <unordered_map>
 #include <perfetto.h>
 #include <boost/icl/interval_map.hpp>
 #include "exec/log_instr_perfetto.h"
+#include "tuple_index.hh"
 
 namespace cheri
 {
+
+/* tuple (source-addr, target-addr) */
+using branch_map_id = std::tuple<uint64_t, uint64_t>;
+
 class qemu_stats
 {
     /*
@@ -51,7 +56,8 @@ class qemu_stats
      * Post-processing must be used to distinguish between function
      * calls and conditional branches.
      */
-    std::map<uint64_t, uint64_t> branch_map_;
+    std::unordered_map<branch_map_id, uint64_t, tuple_hasher<branch_map_id>>
+        branch_map_;
     /*
      *  PC-tracking info to detect branches.
      */

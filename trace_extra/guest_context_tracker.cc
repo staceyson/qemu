@@ -29,39 +29,21 @@
 #include <atomic>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include "trace_extra/guest_context_tracker.hh"
 
-namespace
+namespace cheri
 {
+
 /*
  * Dynamically created tracks and track data.
  * The tracks lock protects both tracks and ctx_data.
  */
 std::mutex tracks_lock;
-std::map<cheri::qemu_context_track::qemu_ctx_id,
-         std::shared_ptr<cheri::qemu_context_track>>
+std::unordered_map<qemu_context_track::qemu_ctx_id,
+                   std::shared_ptr<qemu_context_track>,
+                   cheri::tuple_hasher<qemu_context_track::qemu_ctx_id>>
     tracks;
-} // namespace
-
-namespace std
-{
-/*
- * Make the qemu track ID hashable
- */
-template <> struct hash<cheri::qemu_context_track::qemu_ctx_id> {
-    std::size_t
-    operator()(const cheri::qemu_context_track::qemu_ctx_id &key) const noexcept
-    {
-        return (std::hash<uint64_t>{}(std::get<0>(key)) ^
-                std::hash<uint64_t>{}(std::get<1>(key)) ^
-                std::hash<uint64_t>{}(std::get<2>(key)) ^
-                std::hash<uint64_t>{}(std::get<3>(key)));
-    }
-};
-} // namespace std
-
-namespace cheri
-{
 
 /* Helper to generate unique IDs for dynamic tracks */
 unsigned long gen_track_uuid()

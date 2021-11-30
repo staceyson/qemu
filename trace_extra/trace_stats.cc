@@ -53,7 +53,7 @@ void qemu_stats::flush(perfetto::Track &track)
                             auto *hist = qemu_arg->set_histogram();
                             for (const auto &keyval : bb_hit_map_) {
                                 auto &range = keyval.first;
-                                auto *bucket = hist->add_bucket();
+                                auto *bucket = hist->add_bb_bucket();
                                 bucket->set_start(range.lower());
                                 bucket->set_end(range.upper());
                                 bucket->set_value(keyval.second);
@@ -65,8 +65,10 @@ void qemu_stats::flush(perfetto::Track &track)
                             auto *qemu_arg = ctx.event()->set_qemu();
                             auto *hist = qemu_arg->set_histogram();
                             for (const auto &keyval : branch_map_) {
-                                auto *bucket = hist->add_bucket();
-                                bucket->set_start(keyval.first);
+                                auto *bucket = hist->add_branch_bucket();
+                                branch_map_id id = keyval.first;
+                                bucket->set_source(std::get<0>(id));
+                                bucket->set_target(std::get<1>(id));
                                 bucket->set_value(keyval.second);
                             }
                         });
@@ -136,7 +138,8 @@ void qemu_stats::process_instr(perfetto::Track &ctx_track,
         pc_range_start_ = pc;
         icount_ =
             1; // Reset icount triggered on the first instruction of the next BB
-        branch_map_[pc] += 1;
+        branch_map_id branch_id = std::make_tuple(last_pc_, pc);
+        branch_map_[branch_id] += 1;
     } else {
         icount_ += 1;
     }
