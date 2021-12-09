@@ -60,7 +60,9 @@ PERFETTO_DEFINE_CATEGORIES(
     perfetto::Category("stats").SetDescription("High-level statistics data"),
     perfetto::Category("ctrl").SetDescription("Tracing control events"),
     perfetto::Category("trap").SetDescription("CPU trap events"),
-    perfetto::Category("sched").SetDescription("Scheduling events"));
+    perfetto::Category("sched").SetDescription("Scheduling events"),
+    perfetto::Category("marker").SetDescription(
+        "Guest trace timestamp markers"));
 #endif
 
 /*

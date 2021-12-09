@@ -190,21 +190,36 @@ void qemu_log_printf_create_globals(void);
 struct cpu_log_entry;
 
 /*
- * Request a flush of the TCG when changing loglevel outside of qemu_log_instr.
- * TODO(am2419): this should be removed from the interface.
+ * Check whether instruction tracing is enabled.
+ * Note: changes to the instruction logging flags result in a call to
+ * tb_flush so we can do the logging checks at translate time as well.
  */
-void qemu_log_instr_flush_tcg(bool request_stop);
+bool qemu_log_instr_check_enabled(CPUArchState *env);
 
 /* Helper macro to check for instruction logging enabled */
 #define qemu_log_instr_enabled(env)                                            \
     unlikely(qemu_log_instr_check_enabled((env)))
 
 /*
- * Check whether instruction tracing is enabled.
- * Note: changes to the instruction logging flags result in a call to
- * tb_flush so we can do the logging checks at translate time as well.
+ * Helper macro to check whether an event should be appended to the trace or
+ * not. This takes into account the event data to allow some events to be
+ * appended to the current log buffer entry even when tracing is disabled. These
+ * events will only become visible in the trace when tracing is started, in the
+ * first log entry. This is intended to be used only for OS-driven events that
+ * are relatively low-frequency w.r.t. the number of instructions executed.
  */
-bool qemu_log_instr_check_enabled(CPUArchState *env);
+static inline bool qemu_log_instr_event_enabled(CPUArchState *env,
+                                                log_event_t *event)
+{
+    if (event->id == LOG_EVENT_MARKER) {
+        return true;
+    }
+    if (event->id == LOG_EVENT_CTX_UPDATE &&
+        event->ctx_update.op == LOG_EVENT_CTX_OP_SETUP) {
+        return true;
+    }
+    return qemu_log_instr_check_enabled(env);
+}
 
 /*
  * Register a trace filter for a given CPU.

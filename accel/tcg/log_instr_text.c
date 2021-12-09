@@ -217,6 +217,9 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
                      event->ctx_update.pid, event->ctx_update.tid,
                      event->ctx_update.cid);
             break;
+        case LOG_EVENT_MARKER:
+            qemu_log("Guest trace marker %lx\n", event->marker);
+            break;
         default:
             assert(0 && "unknown event ID");
         }

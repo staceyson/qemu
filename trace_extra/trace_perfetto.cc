@@ -179,8 +179,8 @@ void process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
 {
     int nevents = perfetto_log_entry_events(entry);
     bool have_startstop_event = false;
-    auto *curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
-    auto *curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
+    auto *ctx_data = &data->ctx_tracker_.get_ctx_data();
+    auto *ctx_track = &data->ctx_tracker_.get_ctx_track();
 
     /*
      * Note: LOG_EVENT_STATE events are emitted even when tracing is disabled.
@@ -188,38 +188,56 @@ void process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
      */
     for (int i = 0; i < nevents; i++) {
         log_event_t *evt = perfetto_log_event(entry, i);
-        if (evt->id == LOG_EVENT_STATE) {
-            switch (evt->state.next_state) {
-            case LOG_EVENT_STATE_FLUSH:
-                TRACE_EVENT_INSTANT("ctrl", "flush", data->ctrl_track_);
-                data->ctx_tracker_.flush_all_ctx_data();
-                perfetto::TrackEvent::Flush();
+        switch (evt->id) {
+            case LOG_EVENT_STATE:
+                {
+                    switch (evt->state.next_state) {
+                        case LOG_EVENT_STATE_FLUSH:
+                            TRACE_EVENT_INSTANT("ctrl", "flush", data->ctrl_track_);
+                            data->ctx_tracker_.flush_all_ctx_data();
+                            perfetto::TrackEvent::Flush();
+                            break;
+                        case LOG_EVENT_STATE_START:
+                            ctx_data->stats.unpause(*ctx_track, evt->state.pc);
+                            TRACE_EVENT_BEGIN("ctrl", "tracing", data->ctrl_track_);
+                            have_startstop_event = true;
+                            break;
+                        case LOG_EVENT_STATE_STOP:
+                            ctx_data->stats.pause(*ctx_track, evt->state.pc);
+                            TRACE_EVENT_END("ctrl", data->ctrl_track_);
+                            have_startstop_event = true;
+                            break;
+                        default:
+                            assert(false && "Invalid state event");
+                    }
+                }
                 break;
-            case LOG_EVENT_STATE_START:
-                curr_ctx_data->stats.unpause(*curr_ctx_track, evt->state.pc);
-                TRACE_EVENT_BEGIN("ctrl", "tracing", data->ctrl_track_);
-                have_startstop_event = true;
+            case LOG_EVENT_CTX_UPDATE:
+                {
+                    /* Swap current context. */
+                    if (evt->ctx_update.op == LOG_EVENT_CTX_OP_SETUP ||
+                        evt->ctx_update.op == LOG_EVENT_CTX_OP_SWITCH) {
+                        ctx_data->stats.pause(*ctx_track, perfetto_log_entry_pc(entry));
+                        data->ctx_tracker_.context_update(&evt->ctx_update);
+                        /* Reload data and track as context_update will have changed them */
+                        ctx_data = &data->ctx_tracker_.get_ctx_data();
+                        ctx_track = &data->ctx_tracker_.get_ctx_track();
+                        ctx_data->stats.unpause(*ctx_track, perfetto_log_entry_pc(entry));
+                    }
+                }
                 break;
-            case LOG_EVENT_STATE_STOP:
-                curr_ctx_data->stats.pause(*curr_ctx_track, evt->state.pc);
-                TRACE_EVENT_END("ctrl", data->ctrl_track_);
-                have_startstop_event = true;
+            case LOG_EVENT_MARKER:
+                {
+                    auto cpu_track = data->ctx_tracker_.get_cpu_track();
+                    TRACE_EVENT_INSTANT("marker", "guest", cpu_track,
+                        [&](perfetto::EventContext ctx) {
+                            auto *qemu_arg = ctx.event()->set_qemu();
+                            qemu_arg->set_marker(evt->marker);
+                        });
+                }
                 break;
             default:
-                assert(false && "Invalid state event");
-            }
-        } else if (evt->id == LOG_EVENT_CTX_UPDATE) {
-            // Swap current context.
-            if (evt->ctx_update.op == LOG_EVENT_CTX_OP_SETUP ||
-                evt->ctx_update.op == LOG_EVENT_CTX_OP_SWITCH) {
-                curr_ctx_data->stats.pause(*curr_ctx_track,
-                                           perfetto_log_entry_pc(entry));
-                data->ctx_tracker_.context_update(&evt->ctx_update);
-                curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
-                curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
-                curr_ctx_data->stats.unpause(*curr_ctx_track,
-                                             perfetto_log_entry_pc(entry));
-            }
+                assert(false && "Invalid event identifier");
         }
     }
     if (perfetto_log_entry_flags(entry) & LI_FLAG_MODE_SWITCH) {
@@ -228,13 +246,11 @@ void process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
         // XXX-AM: consider making the mode switch an event, possibly with its
         // own separate pc signaling the PC of the next instruction we are
         // landing to?
-        curr_ctx_data->stats.pause(*curr_ctx_track,
-                                   perfetto_log_entry_pc(entry));
+        ctx_data->stats.pause(*ctx_track, perfetto_log_entry_pc(entry));
         data->ctx_tracker_.mode_update(mode);
-        curr_ctx_data = &data->ctx_tracker_.get_ctx_data();
-        curr_ctx_track = &data->ctx_tracker_.get_ctx_track();
-        curr_ctx_data->stats.unpause(*curr_ctx_track,
-                                     perfetto_log_entry_pc(entry));
+        ctx_data = &data->ctx_tracker_.get_ctx_data();
+        ctx_track = &data->ctx_tracker_.get_ctx_track();
+        ctx_data->stats.unpause(*ctx_track, perfetto_log_entry_pc(entry));
     }
 
     /*
@@ -245,7 +261,7 @@ void process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
      */
     if (!have_startstop_event &&
         (perfetto_log_entry_flags(entry) & LI_FLAG_HAS_INSTR_DATA) != 0)
-        curr_ctx_data->stats.process_instr(*curr_ctx_track, entry);
+        ctx_data->stats.process_instr(*ctx_track, entry);
 }
 
 void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
@@ -256,8 +272,7 @@ void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
      * same track/category: e.g. mode swtich, interrupt information and modified
      * registers?
      */
-    TRACE_EVENT_INSTANT(
-        "instructions", "stream", data->ctx_tracker_.get_ctx_track(),
+    TRACE_EVENT_INSTANT("instructions", "stream", data->ctx_tracker_.get_ctx_track(),
         [&](perfetto::EventContext ctx) {
             auto *qemu_arg = ctx.event()->set_qemu();
             auto *instr = qemu_arg->set_instr();

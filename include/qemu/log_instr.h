@@ -101,7 +101,11 @@ typedef enum {
 /*
  * Trace event identifiers.
  */
-typedef enum { LOG_EVENT_STATE = 0, LOG_EVENT_CTX_UPDATE = 1 } log_event_id_t;
+typedef enum {
+    LOG_EVENT_STATE = 0,
+    LOG_EVENT_CTX_UPDATE = 1,
+    LOG_EVENT_MARKER = 2
+} log_event_id_t;
 
 /*
  * Tracing status changed (e.g. trace start/stop)
@@ -152,6 +156,7 @@ typedef struct {
     union {
         log_event_trace_state_update_t state;
         log_event_ctx_update_t ctx_update;
+        uint64_t marker;
     };
 } log_event_t;
 
