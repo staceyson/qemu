@@ -19,3 +19,5 @@ libqemutrace = static_library('qemutrace',
                                          '-DQEMU_PERFETTO'])
 
 qemuutil_libs += libqemutrace
+
+subdir('proto')

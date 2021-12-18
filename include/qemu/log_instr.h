@@ -55,7 +55,10 @@ typedef enum {
     QEMU_LOG_INSTR_BACKEND_CVTRACE = 1,
     QEMU_LOG_INSTR_BACKEND_NOP = 2,
 #ifdef CONFIG_TRACE_PERFETTO
-    QEMU_LOG_INSTR_BACKEND_PERFETTO = 3
+    QEMU_LOG_INSTR_BACKEND_PERFETTO = 3,
+#endif
+#ifdef CONFIG_TRACE_PROTOBUF
+    QEMU_LOG_INSTR_BACKEND_PROTOBUF = 4,
 #endif
 } qemu_log_instr_backend_t;
 
@@ -111,9 +114,9 @@ typedef enum {
  * Tracing status changed (e.g. trace start/stop)
  */
 typedef enum {
-    LOG_EVENT_STATE_START,
-    LOG_EVENT_STATE_STOP,
-    LOG_EVENT_STATE_FLUSH
+    LOG_EVENT_STATE_START = 0,
+    LOG_EVENT_STATE_STOP = 1,
+    LOG_EVENT_STATE_FLUSH = 2
 } log_event_trace_state_t;
 
 typedef struct {
@@ -125,14 +128,14 @@ typedef enum {
     /*
      * Switch context from the current to the new (proc, thread, compartment) ID
      */
-    LOG_EVENT_CTX_OP_SWITCH = 1,
+    LOG_EVENT_CTX_OP_SWITCH = 0,
     /*
      * Same as LOG_EVENT_CTX_OP_SWITCH but should bypass tracing activation
      * status, Meaning that these events will reach the backend even when
      * tracing is off. This is useful setup the correct context identifier
      * before switching on tracing.
      */
-    LOG_EVENT_CTX_OP_SETUP = 2,
+    LOG_EVENT_CTX_OP_SETUP = 1,
 } log_event_ctx_update_op_t;
 
 /*

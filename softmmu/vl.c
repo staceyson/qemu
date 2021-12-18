@@ -3462,6 +3462,10 @@ void qemu_init(int argc, char **argv, char **envp)
                 } else if (strcmp(optarg, "perfetto") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_PERFETTO);
 #endif
+#ifdef CONFIG_TRACE_PROTOBUF
+                } else if (strcmp(optarg, "protobuf") == 0) {
+                    qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_PROTOBUF);
+#endif
                 } else {
                     printf("Invalid choice for cheri-trace-format: '%s'\n", optarg);
                     exit(1);

@@ -167,10 +167,17 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry);
 /* CVTrace backend */
 void emit_cvtrace_header(CPUArchState *env);
 void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry);
+#ifdef CONFIG_TRACE_PERFETTO
 /* Perfetto backend */
 void init_perfetto_backend(CPUArchState *env);
 void sync_perfetto_backend(CPUArchState *env);
 void emit_perfetto_entry(CPUArchState *env, cpu_log_entry_t *entry);
+#endif
+#ifdef CONFIG_TRACE_PROTOBUF
+void init_protobuf_backend(CPUArchState *env);
+void sync_protobuf_backend(CPUArchState *env);
+void emit_protobuf_entry(CPUArchState *env, cpu_log_entry_t *entry);
+#endif
 
 #ifdef CONFIG_DEBUG_TCG
 #define log_assert(x) assert((x))

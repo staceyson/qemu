@@ -355,6 +355,44 @@ char *plugin_disas(CPUState *cpu, uint64_t addr, size_t size)
     return g_string_free(ds, false);
 }
 
+/*
+ * Disassemble one instruction to a string buffer.
+ */
+char *disas_one_strbuf(CPUState *cpu, void *code, unsigned long size,
+                       target_ulong vma)
+{
+    CPUClass *cc = CPU_GET_CLASS(cpu);
+    CPUDebug s;
+    GString *ds = g_string_new(NULL);
+
+    initialize_debug_target(&s, cpu);
+    s.info.fprintf_func = plugin_printf;
+    s.info.stream = (FILE *)ds;  /* abuse this slot */
+    s.info.buffer_vma = vma;
+    s.info.buffer_length = size;
+
+#ifdef TARGET_WORDS_BIGENDIAN
+    s.info.endian = BFD_ENDIAN_BIG;
+#else
+    s.info.endian = BFD_ENDIAN_LITTLE;
+#endif
+
+    if (cc->disas_set_info) {
+        cc->disas_set_info(cpu, &s.info);
+    }
+
+    if (s.info.cap_arch >= 0 && cap_disas_target(&s.info, vma, size)) {
+        ; /* done */
+    } else if (s.info.print_insn) {
+        s.info.print_insn(vma, &s.info);
+    } else {
+        ; /* cannot disassemble -- return empty string */
+    }
+
+    /* Return the buffer, freeing the GString container.  */
+    return g_string_free(ds, false);
+}
+
 /* Disassemble this for me please... (debugging). */
 void disas(FILE *out, const void *code, unsigned long size)
 {

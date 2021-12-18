@@ -120,7 +120,13 @@ static trace_backend_hooks_t trace_backends[] = {
     { .init = init_perfetto_backend,
       .sync = sync_perfetto_backend,
       .emit_header = NULL,
-      .emit_instr = emit_perfetto_entry }
+      .emit_instr = emit_perfetto_entry },
+#endif
+#ifdef CONFIG_TRACE_PROTOBUF
+    { .init = init_protobuf_backend,
+      .sync = sync_protobuf_backend,
+      .emit_header = NULL,
+      .emit_instr = emit_protobuf_entry },
 #endif
 };
 
