@@ -128,6 +128,12 @@ static trace_backend_hooks_t trace_backends[] = {
       .emit_header = NULL,
       .emit_instr = emit_protobuf_entry },
 #endif
+#ifdef CONFIG_TRACE_JSON
+    { .init = init_json_backend,
+      .sync = sync_json_backend,
+      .emit_header = NULL,
+      .emit_instr = emit_json_entry },
+#endif
 };
 
 /* Existing trace filters list, indexed by cpu_log_instr_filter_t */
@@ -141,9 +147,34 @@ static GArray *reset_filters;
 
 static unsigned long reset_entry_buffer_size = MIN_ENTRY_BUFFER_SIZE;
 
+static bool trace_debug;
+
 static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry)
 {
     return;
+}
+
+static void dump_debug_stats(CPUState *cpu)
+{
+    cpu_log_instr_state_t *cpulog = get_cpu_log_state(cpu->env_ptr);
+    qemu_log_instr_stats_t *stats = &cpulog->stats;
+
+    if (!trace_debug) {
+        return;
+    }
+
+    fprintf(stderr, "TCG Instruction tracing statistics: CPU #%d\n",
+            cpu->cpu_index);
+    fprintf(stderr, "entries emitted: %lu\n", stats->entries_emitted);
+    fprintf(stderr, "trace slices: %lu\n", stats->trace_start);
+    if (stats->trace_start != stats->trace_stop) {
+        fprintf(stderr, "Unbalanced trace stop: %lu\n", stats->trace_stop);
+    }
+}
+
+void qemu_log_instr_enable_trace_debug()
+{
+    trace_debug = true;
 }
 
 static inline void emit_start_event(cpu_log_entry_t *entry, target_ulong pc)
@@ -221,6 +252,7 @@ static void do_instr_commit(CPUArchState *env)
                 (cpulog->ring_tail + 1) % cpulog->instr_info->len;
     } else {
         trace_backend->emit_instr(env, entry);
+        QEMU_LOG_INSTR_INC_STAT(cpulog, entries_emitted);
     }
 }
 
@@ -290,6 +322,7 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
             goto done;
         }
         emit_stop_event(entry, pc);
+        QEMU_LOG_INSTR_INC_STAT(cpulog, trace_stop);
         do_instr_commit(env);
         /* Instruction commit may have advanced to the next entry buffer slot */
         entry = get_cpu_log_entry(env);
@@ -302,6 +335,7 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
          * traced
          */
         emit_start_event(entry, pc);
+        QEMU_LOG_INSTR_INC_STAT(cpulog, trace_start);
     }
 
 done:
@@ -478,13 +512,16 @@ void qemu_log_instr_init(CPUState *cpu)
                 cpu, g_array_index(reset_filters, cpu_log_instr_filter_t, i));
         }
     }
+
+    memset(&cpulog->stats, 0, sizeof(cpulog->stats));
 }
 
 static void do_log_backend_sync(CPUState *cpu, run_on_cpu_data _unused)
 {
-    log_assert(trace_backend->sync != NULL &&
-               "Missing sync() callback on trace backend");
-    trace_backend->sync(cpu->env_ptr);
+    if (trace_backend->sync != NULL) {
+        trace_backend->sync(cpu->env_ptr);
+    }
+    dump_debug_stats(cpu);
 }
 
 /*
@@ -494,11 +531,6 @@ static void do_log_backend_sync(CPUState *cpu, run_on_cpu_data _unused)
 void qemu_log_instr_sync_buffers()
 {
     CPUState *cpu;
-
-    /* Avoid doing this early if there is no sync function */
-    if (trace_backend->sync == NULL) {
-        return;
-    }
 
     CPU_FOREACH(cpu)
     {
@@ -1171,6 +1203,7 @@ void qemu_log_instr_flush(CPUArchState *env)
     while (curr != cpulog->ring_head) {
         entry = &g_array_index(cpulog->instr_info, cpu_log_entry_t, curr);
         trace_backend->emit_instr(env, entry);
+        QEMU_LOG_INSTR_INC_STAT(cpulog, entries_emitted);
         curr = (curr + 1) % cpulog->instr_info->len;
     }
     cpulog->ring_tail = cpulog->ring_head;

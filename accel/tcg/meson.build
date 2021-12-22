@@ -25,7 +25,12 @@ specific_ss.add(when: ['CONFIG_TCG_LOG_INSTR', 'CONFIG_TCG'], if_true: files('lo
 specific_ss.add(when: ['CONFIG_TCG_LOG_INSTR', 'CONFIG_TCG'], if_true: files('log_instr_cvtrace.c'))
 specific_ss.add(when: ['CONFIG_TRACE_PERFETTO', 'CONFIG_TCG_LOG_INSTR', 'CONFIG_TCG'], if_true: files('log_instr_perfetto.c'))
 specific_ss.add(when: ['CONFIG_TRACE_PROTOBUF', 'CONFIG_TCG_LOG_INSTR', 'CONFIG_TCG'], if_true: files('log_instr_protobuf.c'))
+specific_ss.add(when: ['CONFIG_TRACE_JSON', 'CONFIG_TCG_LOG_INSTR', 'CONFIG_TCG'], if_true: files('log_instr_json.c'))
 
 if config_all.has_key('CONFIG_TCG_LOG_INSTR') and config_all.has_key('CONFIG_TRACE_PROTOBUF')
    specific_ss.add(dependency('libprotobuf-c'))
+endif
+
+if config_all.has_key('CONFIG_TCG_LOG_INSTR') and config_all.has_key('CONFIG_TRACE_JSON')
+   specific_ss.add(dependency('libcjson'))
 endif

@@ -4241,6 +4241,13 @@ SRST
     Set CHERI trace filters to use. Available filters are: events.
 ERST
 
+DEF("cheri-trace-debug", 0, QEMU_OPTION_cheri_trace_debug, \
+"-cheri-trace-debug     Enable debug stats.\n", QEMU_ARCH_ALL)
+SRST
+``-cheri-trace-debug ``
+    Enable CHERI instruction tracing debugging statistics.
+ERST
+
 DEF("cheri-c2e-on-unrepresentable", 0, QEMU_OPTION_cheri_c2e_on_unrepresentable, \
     "-cheri-c2e-on-unrepresentable     Generate C2E exception when a capability becomes unrepresentable\n", QEMU_ARCH_ALL)
 SRST

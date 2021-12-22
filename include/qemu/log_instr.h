@@ -60,6 +60,9 @@ typedef enum {
 #ifdef CONFIG_TRACE_PROTOBUF
     QEMU_LOG_INSTR_BACKEND_PROTOBUF = 4,
 #endif
+#ifdef CONFIG_TRACE_JSON
+    QEMU_LOG_INSTR_BACKEND_JSON = 5,
+#endif
 } qemu_log_instr_backend_t;
 
 extern qemu_log_instr_backend_t qemu_log_instr_backend;
@@ -213,6 +216,20 @@ typedef struct {
 } qemu_log_printf_buf_t;
 
 /*
+ * Per-CPU tracing statistics.
+ */
+typedef struct qemu_log_instr_stats {
+    uint64_t entries_emitted;
+    uint64_t trace_start;
+    uint64_t trace_stop;
+} qemu_log_instr_stats_t;
+
+#define QEMU_LOG_INSTR_INC_STAT(cpu_state, stat) \
+    do {                                         \
+        cpu_state->stats.stat++;                 \
+    } while (0)
+
+/*
  * Per-cpu logging state.
  */
 typedef struct {
@@ -239,6 +256,8 @@ typedef struct {
     qemu_log_printf_buf_t qemu_log_printf_buf;
     /* Private trace backend state */
     void *backend_data;
+    /* Statistics for debugging */
+    qemu_log_instr_stats_t stats;
 } cpu_log_instr_state_t;
 
 /*
@@ -298,6 +317,11 @@ void qemu_log_instr_add_startup_filter(cpu_log_instr_filter_t filter);
  * memory ranges..
  */
 void qemu_log_instr_mem_filter_update(void);
+
+/*
+ * Enable debug statistics recording.
+ */
+void qemu_log_instr_enable_trace_debug(void);
 #endif /* ! __cplusplus */
 
 #else /* ! CONFIG_TCG_LOG_INSTR */

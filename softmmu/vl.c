@@ -3458,6 +3458,8 @@ void qemu_init(int argc, char **argv, char **envp)
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_TEXT);
                 } else if (strcmp(optarg, "cvtrace") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_CVTRACE);
+                } else if (strcmp(optarg, "nop") == 0) {
+                    qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_NOP);
 #ifdef CONFIG_TRACE_PERFETTO
                 } else if (strcmp(optarg, "perfetto") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_PERFETTO);
@@ -3465,6 +3467,10 @@ void qemu_init(int argc, char **argv, char **envp)
 #ifdef CONFIG_TRACE_PROTOBUF
                 } else if (strcmp(optarg, "protobuf") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_PROTOBUF);
+#endif
+#ifdef CONFIG_TRACE_JSON
+                } else if (strcmp(optarg, "json") == 0) {
+                    qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_JSON);
 #endif
                 } else {
                     printf("Invalid choice for cheri-trace-format: '%s'\n", optarg);
@@ -3484,6 +3490,9 @@ void qemu_init(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_cheri_trace_filters:
                 qemu_log_instr_set_cli_filters(optarg, &error_fatal);
+                break;
+            case QEMU_OPTION_cheri_trace_debug:
+                qemu_log_instr_enable_trace_debug();
                 break;
 #endif /* CONFIG_TCG_LOG_INSTR */
 
