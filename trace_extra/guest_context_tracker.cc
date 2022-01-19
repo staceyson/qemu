@@ -53,12 +53,12 @@ unsigned long gen_track_uuid()
     return (next_track_id++);
 }
 
-perfetto::protos::pbzero::ModeSwitch
+perfetto::protos::pbzero::QEMULogEntryModeSwitch
 qemu_cpu_mode_to_trace(qemu_log_instr_cpu_mode_t mode)
 {
     // NOTE: We rely on the fact that the protobuf enum ModeSwitch
     // uses the same numbering as qemu_log_instr_cpu_mode_t
-    return static_cast<perfetto::protos::pbzero::ModeSwitch>(mode);
+    return static_cast<perfetto::protos::pbzero::QEMULogEntryModeSwitch>(mode);
 }
 
 /* static */
@@ -76,11 +76,11 @@ qemu_context_track::qemu_ctx_id qemu_context_track::get_id() const
 perfetto::protos::gen::TrackDescriptor qemu_context_track::Serialize() const
 {
     auto desc = Track::Serialize();
-    auto qemu_desc = desc.mutable_qemu_context();
-    qemu_desc->set_pid(pid);
-    qemu_desc->set_tid(tid);
-    qemu_desc->set_cid(cid);
-    // qemu_desc->set_mode(mode); // TODO not yet in cheri-perfetto
+    auto cheri_desc = desc.mutable_cheri_context();
+    cheri_desc->set_pid(pid);
+    cheri_desc->set_tid(tid);
+    cheri_desc->set_cid(cid);
+    cheri_desc->set_el(mode);
     return desc;
 }
 
@@ -106,7 +106,7 @@ guest_context_tracker::guest_context_tracker(int cpu_id)
 }
 
 void guest_context_tracker::mode_update(
-    perfetto::protos::pbzero::ModeSwitch new_mode)
+    perfetto::protos::pbzero::QEMULogEntryModeSwitch new_mode)
 {
     if (ctx_track_ == nullptr)
         return;

@@ -49,7 +49,7 @@ struct qemu_context_data {
 
 struct qemu_context_track : public perfetto::Track {
 
-    using cpu_mode_type = perfetto::protos::pbzero::ModeSwitch;
+    using cpu_mode_type = perfetto::protos::pbzero::QEMULogEntryModeSwitch;
     /* (pid, tid, cid, mode) */
     using qemu_ctx_id = std::tuple<uint64_t, uint64_t, uint64_t, cpu_mode_type>;
 
@@ -105,7 +105,7 @@ class guest_context_tracker
   public:
     guest_context_tracker(int cpu_id);
     void context_update(const log_event_ctx_update_t *evt);
-    void mode_update(perfetto::protos::pbzero::ModeSwitch new_mode);
+    void mode_update(perfetto::protos::pbzero::QEMULogEntryModeSwitch new_mode);
     void flush_all_ctx_data();
     perfetto::Track &get_cpu_track();
     perfetto::Track &get_ctx_track();
@@ -119,7 +119,7 @@ class guest_context_tracker
  */
 unsigned long gen_track_uuid();
 
-perfetto::protos::pbzero::ModeSwitch
+perfetto::protos::pbzero::QEMULogEntryModeSwitch
 qemu_cpu_mode_to_trace(qemu_log_instr_cpu_mode_t mode);
 
 } // namespace cheri

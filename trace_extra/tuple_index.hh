@@ -35,17 +35,21 @@
 
 namespace cheri
 {
-template<typename T> struct is_tuple_impl: std::false_type {};
-template<typename ...T> struct is_tuple_impl<std::tuple<T...>>: std::true_type {};
-template<typename T> struct is_tuple : is_tuple_impl<std::decay_t<T>> {};
+template <typename T> struct is_tuple_impl : std::false_type {
+};
+template <typename... T>
+struct is_tuple_impl<std::tuple<T...>> : std::true_type {
+};
+template <typename T> struct is_tuple : is_tuple_impl<std::decay_t<T>> {
+};
 
-template<typename T, typename Enable=void> struct tuple_hasher;
+template <typename T, typename Enable = void> struct tuple_hasher;
 
-template<typename T>
-struct tuple_hasher<T, typename std::enable_if<is_tuple<T>::value>::type>
-{
-    std::size_t operator()(const T& tuple) const {
+template <typename T>
+struct tuple_hasher<T, typename std::enable_if<is_tuple<T>::value>::type> {
+    std::size_t operator()(const T &tuple) const
+    {
         return boost::hash_value(tuple);
     }
 };
-}
+} // namespace cheri
