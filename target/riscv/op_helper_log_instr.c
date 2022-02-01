@@ -33,8 +33,11 @@
 #include "qemu/osdep.h"
 #include "exec/log_instr.h"
 #include "exec/helper-proto.h"
-#include "cheri-lazy-capregs.h"
 #include "cpu.h"
+#ifdef TARGET_CHERI
+#include "cheri-helper-utils.h"
+#include "cheri-lazy-capregs.h"
+#endif
 
 #ifdef TARGET_CHERI
 #define get_gpr_value(env, regnum) get_capreg_cursor(env, regnum)
@@ -78,24 +81,75 @@ void HELPER(riscv_log_instr_event)(CPURISCVState *env, target_ulong pc)
 
     event.id = get_gpr_value(env, 10);
 
-    switch (event.id) {
-    case LOG_EVENT_CTX_UPDATE:
-        event.ctx_update.op = get_gpr_value(env, 11);
-        event.ctx_update.pid = get_gpr_value(env, 12);
-        event.ctx_update.tid = get_gpr_value(env, 13);
-        event.ctx_update.cid = get_gpr_value(env, 14);
-        event.ctx_update.mode = cpu_priv_to_mode(env->priv);
-        break;
-    case LOG_EVENT_MARKER:
-        event.marker = get_gpr_value(env, 11);
-        break;
-    default:
-        warn_report("Unsupported event ID for TCG instr logging %d", event.id);
-        return;
+    if (qemu_log_instr_enabled(env)) {
+        switch (event.id) {
+        case LOG_EVENT_CTX_UPDATE:
+            event.ctx_update.op = get_gpr_value(env, 11);
+            event.ctx_update.pid = get_gpr_value(env, 12);
+            event.ctx_update.tid = get_gpr_value(env, 13);
+            event.ctx_update.cid = get_gpr_value(env, 14);
+            event.ctx_update.mode = cpu_priv_to_mode(env->priv);
+            break;
+        case LOG_EVENT_MARKER:
+            event.marker = get_gpr_value(env, 11);
+            break;
+        case LOG_EVENT_REGDUMP:
+            cpu_log_instr_event_regdump(env, &event);
+            break;
+        default:
+            warn_report("Unsupported event ID for TCG instr logging %d",
+                        event.id);
+            return;
+        }
+
+        qemu_log_instr_event(env, &event);
+    }
+}
+
+/*
+ * Target-dependent hook to emit register dump events.
+ * This is automatically called by the tracing subsystem
+ * when tracing is resumed.
+ */
+bool cpu_log_instr_event_regdump(CPURISCVState *env, log_event_t *event)
+{
+    int i;
+    int nregs;
+
+    event->id = LOG_EVENT_REGDUMP;
+#ifdef TARGET_CHERI
+    nregs = NUM_LAZY_CAP_REGS;
+#else
+    nregs = 32;
+#endif
+    qemu_log_instr_event_create_regdump(event, nregs);
+    for (i = 0; i < nregs; i++) {
+#ifdef TARGET_CHERI
+        const cap_register_t *value = get_readonly_capreg(env, i);
+        if (value->cr_tag)
+            qemu_log_instr_event_dump_cap(event, riscv_int_regnames[i], value);
+        else
+            qemu_log_instr_event_dump_cap_int(event, riscv_int_regnames[i],
+                                              cap_get_cursor(value));
+#else
+        target_ulong value = env->gpr[i];
+        qemu_log_instr_event_dump_reg(event, riscv_int_regnames[i], value);
+#endif
     }
 
-    if (!qemu_log_instr_event_enabled(env, &event)) {
-        return;
+    return false;
+}
+
+/*
+ * Emit a register dump event.
+ * Only dump general purpose registers for now. No fpu, vector or CPU registers.
+ */
+void HELPER(riscv_log_instr_regdump)(CPURISCVState *env)
+{
+    log_event_t event;
+
+    if (qemu_log_instr_enabled(env)) {
+        cpu_log_instr_event_regdump(env, &event);
+        qemu_log_instr_event(env, &event);
     }
-    qemu_log_instr_event(env, &event);
 }

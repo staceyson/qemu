@@ -45,7 +45,7 @@
 #include "exec/memop.h"
 #include "disas/disas.h"
 
-static inline cJSON *emit_json_hex(uint64_t value)
+static cJSON *emit_json_hex(uint64_t value)
 {
     char buf[sizeof(value) * 2 + 1];
 
@@ -54,7 +54,7 @@ static inline cJSON *emit_json_hex(uint64_t value)
 }
 
 #ifdef TARGET_CHERI
-static inline cJSON *emit_json_capability(cap_register_t *cap)
+static cJSON *emit_json_capability(cap_register_t *cap)
 {
     cJSON *js_cap = cJSON_CreateObject();
     cJSON *valid = cJSON_CreateBool(cap->cr_tag);
@@ -78,7 +78,7 @@ static inline cJSON *emit_json_capability(cap_register_t *cap)
 }
 #endif
 
-static inline void emit_json_ldst(log_meminfo_t *minfo, cJSON *list)
+static void emit_json_ldst(log_meminfo_t *minfo, cJSON *list)
 {
     cJSON *mem = cJSON_CreateObject();
     cJSON *is_load = cJSON_CreateBool((minfo->flags & LMI_LD) != 0);
@@ -105,7 +105,7 @@ static inline void emit_json_ldst(log_meminfo_t *minfo, cJSON *list)
     cJSON_AddItemToArray(list, mem);
 }
 
-static inline void emit_json_reg(log_reginfo_t *rinfo, cJSON *list)
+static void emit_json_reg(log_reginfo_t *rinfo, cJSON *list)
 {
     cJSON *reg = cJSON_CreateObject();
     cJSON *name = cJSON_CreateString(rinfo->name);
@@ -131,6 +131,36 @@ static inline void emit_json_reg(log_reginfo_t *rinfo, cJSON *list)
 
     cJSON_AddItemToObject(reg, "value", value);
     cJSON_AddItemToArray(list, reg);
+}
+
+static void emit_json_evt_state(const log_event_trace_state_update_t *evt,
+                                cJSON *list)
+{
+    cJSON *update = cJSON_CreateObject();
+    cJSON *evt_name = cJSON_CreateString("state");
+    cJSON *next_state = cJSON_CreateNumber(evt->next_state);
+    cJSON *pc = cJSON_CreateNumber(evt->pc);
+
+    cJSON_AddItemToObject(update, "id", evt_name);
+    cJSON_AddItemToObject(update, "next", next_state);
+    cJSON_AddItemToObject(update, "pc", pc);
+    cJSON_AddItemToArray(list, update);
+}
+
+static void emit_json_evt_regdump(const log_event_regdump_t *evt, cJSON *list)
+{
+    cJSON *regdump = cJSON_CreateObject();
+    cJSON *evt_name = cJSON_CreateString("rdump");
+    cJSON *gpr = cJSON_CreateArray();
+    int i;
+
+    for (i = 0; i < evt->gpr->len; i++) {
+        log_reginfo_t *rinfo = &g_array_index(evt->gpr, log_reginfo_t, i);
+        emit_json_reg(rinfo, gpr);
+    }
+    cJSON_AddItemToObject(regdump, "id", evt_name);
+    cJSON_AddItemToObject(regdump, "gpr", gpr);
+    cJSON_AddItemToObject(list, "rdump", regdump);
 }
 
 void sync_json_backend(CPUArchState *env)
@@ -229,19 +259,27 @@ void emit_json_entry(CPUArchState *env, cpu_log_entry_t *entry)
     }
 
     if (entry->events->len > 0) {
+        cJSON *js_evt = cJSON_CreateArray();
         for (i = 0; i < entry->events->len; i++) {
             event = &g_array_index(entry->events, const log_event_t, i);
             switch (event->id) {
             case LOG_EVENT_STATE:
+                emit_json_evt_state(&event->state, js_evt);
                 break;
             case LOG_EVENT_CTX_UPDATE:
+                /* TODO Unimpl */
                 break;
             case LOG_EVENT_MARKER:
+                /* TODO Unimpl */
+                break;
+            case LOG_EVENT_REGDUMP:
+                emit_json_evt_regdump(&event->reg_dump, js_evt);
                 break;
             default:
                 assert(0 && "unknown event ID");
             }
         }
+        cJSON_AddItemToObject(js_entry, "evt", js_evt);
     }
     qemu_log("%s,", cJSON_PrintUnformatted(js_entry));
     cJSON_Delete(js_entry);

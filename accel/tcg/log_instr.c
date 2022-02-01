@@ -177,6 +177,17 @@ void qemu_log_instr_enable_trace_debug()
     trace_debug = true;
 }
 
+static void emit_regdump_event(CPUArchState *env, cpu_log_entry_t *entry)
+{
+    log_event_t event;
+
+    event.id = LOG_EVENT_REGDUMP;
+    if (cpu_log_instr_event_regdump(env, &event)) {
+        return;
+    }
+    g_array_append_val(entry->events, event);
+}
+
 static inline void emit_start_event(cpu_log_entry_t *entry, target_ulong pc)
 {
     log_event_t event;
@@ -212,11 +223,26 @@ static inline void emit_stop_event(cpu_log_entry_t *entry, target_ulong pc)
 static void reset_log_buffer(cpu_log_instr_state_t *cpulog,
                              cpu_log_entry_t *entry)
 {
+    log_event_t *evt;
+    int i;
+
     memset(&entry->cpu_log_entry_startzero, 0,
            ((char *)&entry->cpu_log_entry_endzero -
             (char *)&entry->cpu_log_entry_startzero));
     g_array_remove_range(entry->regs, 0, entry->regs->len);
     g_array_remove_range(entry->mem, 0, entry->mem->len);
+    /*
+     * Need to free any dynamic allocation in the event structures to
+     * avoid leaking memory. This is called before the log entry is
+     * reused, so the memory might be reclaimed much later than the allocation
+     * time.
+     */
+    for (i = 0; i < entry->events->len; i++) {
+        evt = &g_array_index(entry->events, log_event_t, i);
+        if (evt->id == LOG_EVENT_REGDUMP) {
+            g_array_free(evt->reg_dump.gpr, true);
+        }
+    }
     g_array_remove_range(entry->events, 0, entry->events->len);
     g_string_erase(entry->txt_buffer, 0, -1);
     cpulog->force_drop = false;
@@ -335,6 +361,7 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
          * traced
          */
         emit_start_event(entry, pc);
+        emit_regdump_event(env, entry);
         QEMU_LOG_INSTR_INC_STAT(cpulog, trace_start);
     }
 
@@ -439,10 +466,19 @@ static void qemu_log_entry_init(cpu_log_entry_t *entry)
 static void qemu_log_entry_destroy(gpointer data)
 {
     cpu_log_entry_t *entry = data;
+    log_event_t *evt;
+    int i;
 
     g_string_free(entry->txt_buffer, true);
     g_array_free(entry->regs, true);
     g_array_free(entry->mem, true);
+    for (i = 0; i < entry->events->len; i++) {
+        evt = &g_array_index(entry->events, log_event_t, i);
+        if (evt->id == LOG_EVENT_REGDUMP) {
+            /* Need to free the register dump array */
+            g_array_free(evt->reg_dump.gpr, true);
+        }
+    }
     g_array_free(entry->events, true);
 }
 
@@ -799,8 +835,54 @@ void qemu_log_instr_event(CPUArchState *env, log_event_t *evt)
 {
     cpu_log_entry_t *entry = get_cpu_log_entry(env);
 
+    /* Note: transfer ownership of dynamically allocated data in evt */
     g_array_append_val(entry->events, *evt);
 }
+
+void qemu_log_instr_event_create_regdump(log_event_t *evt, int nregs)
+{
+    evt->reg_dump.gpr = g_array_sized_new(false, false, sizeof(log_reginfo_t),
+                                          nregs * sizeof(log_reginfo_t));
+}
+
+void qemu_log_instr_event_dump_reg(log_event_t *evt, const char *reg_name,
+                                   target_ulong value)
+{
+    log_reginfo_t r;
+
+    r.flags = 0;
+    r.name = reg_name;
+    r.gpr = value;
+    /*
+     * Assume that the reg_dump array has been initialized,
+     * should put an assertion in here.
+     */
+    g_array_append_val(evt->reg_dump.gpr, r);
+}
+
+#ifdef TARGET_CHERI
+void qemu_log_instr_event_dump_cap(log_event_t *evt, const char *reg_name,
+                                   const cap_register_t *value)
+{
+    log_reginfo_t r;
+
+    r.flags = LRI_CAP_REG | LRI_HOLDS_CAP;
+    r.name = reg_name;
+    r.cap = *value;
+    g_array_append_val(evt->reg_dump.gpr, r);
+}
+
+void qemu_log_instr_event_dump_cap_int(log_event_t *evt, const char *reg_name,
+                                       target_ulong value)
+{
+    log_reginfo_t r;
+
+    r.flags = LRI_CAP_REG;
+    r.name = reg_name;
+    r.gpr = value;
+    g_array_append_val(evt->reg_dump.gpr, r);
+}
+#endif
 
 void qemu_log_instr_extra(CPUArchState *env, const char *msg, ...)
 {

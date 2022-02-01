@@ -31,6 +31,7 @@
  */
 
 #pragma once
+#include <glib.h>
 
 /*
  * CPU-independant instruction logging configuration helpers.
@@ -110,7 +111,8 @@ typedef enum {
 typedef enum {
     LOG_EVENT_STATE = 0,
     LOG_EVENT_CTX_UPDATE = 1,
-    LOG_EVENT_MARKER = 2
+    LOG_EVENT_MARKER = 2,
+    LOG_EVENT_REGDUMP = 3,
 } log_event_id_t;
 
 /*
@@ -153,15 +155,38 @@ typedef struct {
 } log_event_ctx_update_t;
 
 /*
+ * Register dump event.
+ * This is used to emit guest register dumps. The main use case is to
+ * recover lost state due to pause/unpause of the trace.
+ */
+typedef struct {
+    /*
+     * Register info - array of log_reginfo_t
+     * Use the qemu_log_instr_event_rdump_* interface to add entries.
+     */
+    GArray *gpr;
+} log_event_regdump_t;
+
+/*
  * Trace event.
  * This records arbitrary higher-level events associated with instruction
  * entries.
+ * Currently, in order to reduce complexity, the event definitions are
+ * target-agnostic, and we assume that all targets interested in emitting
+ * the events will need to implement some logic to fill the data structures
+ * taking care of any casting necessary.
+ * This is at the cost of wasting some space for architectures that do not
+ * have 64bit words. An additional burden is put on the target to perform
+ * some dynamic allocation for some events. This is sub-optimal but the
+ * alternative requires extra time to implement and this is good enough
+ * for now.
  */
 typedef struct {
     log_event_id_t id;
     union {
         log_event_trace_state_update_t state;
         log_event_ctx_update_t ctx_update;
+        log_event_regdump_t reg_dump;
         uint64_t marker;
     };
 } log_event_t;

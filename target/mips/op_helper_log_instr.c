@@ -100,6 +100,11 @@ void helper_mips_log_instr_drop(CPUMIPSState *env)
     qemu_log_instr_drop(env);
 }
 
+bool cpu_log_instr_event_regdump(CPUMIPSState *env, log_event_t *event)
+{
+    return true;
+}
+
 /*
  * Note: do not check for logging enabled first, as this triggers
  * user logging start.

@@ -233,6 +233,8 @@ void process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
                                     qemu_arg->set_marker(evt->marker);
                                 });
         } break;
+        case LOG_EVENT_REGDUMP:
+            break;
         default:
             assert(false && "Invalid event identifier");
         }
@@ -334,8 +336,7 @@ void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
                         perfetto::protos::pbzero::QEMULogEntryMem::CSTORE);
                     break;
                 default:
-                    // XXX Notify error somehow?
-                    break;
+                    assert(false && "Invalid meminfo flag");
                 }
                 if (flags & LMI_CAP) {
                     auto *capinfo = meminfo->set_cap_value();

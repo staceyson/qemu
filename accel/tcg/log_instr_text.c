@@ -120,7 +120,7 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
     QemuLogFile *logfile;
     const log_event_t *event;
     const char *log_state_op;
-    int i;
+    int i, j;
 
     if (entry->flags & LI_FLAG_HAS_INSTR_DATA) {
         /* Dump CPU-ID:ASID + address */
@@ -220,6 +220,13 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
         case LOG_EVENT_MARKER:
             qemu_log("Guest trace marker %lx\n", event->marker);
             break;
+        case LOG_EVENT_REGDUMP:
+            qemu_log("Register dump\n");
+            for (j = 0; j < event->reg_dump.gpr->len; j++) {
+                log_reginfo_t *r =
+                    &g_array_index(event->reg_dump.gpr, log_reginfo_t, j);
+                emit_text_reg(r);
+            }
         default:
             assert(0 && "unknown event ID");
         }

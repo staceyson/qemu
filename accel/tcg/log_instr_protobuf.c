@@ -206,6 +206,8 @@ static void emit_protobuf_event(log_event_t *evtinfo, QEMULogEntryEvt **pb_evt)
         evt->event_case = ENUM_ENTRY_EVT_CASE(MARKER);
         evt->marker = evtinfo->marker;
         break;
+    case LOG_EVENT_REGDUMP:
+        break;
     default:
         assert(0 && "unknown event ID");
     }

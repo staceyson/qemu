@@ -48,6 +48,9 @@
  * - const char *cpu_get_mode_name(mode)
  *   return the mode name associated with a qemu_log_instr_cpu_mode_t for
  * printing.
+ * - bool cpu_log_instr_event_regdump(env, event)
+ *   Builds a register dump for the target, returns true if the register dump
+ *   was not produced and the event should be cancelled.
  *
  * - Each target should implement their own register update logging helpers that
  *   call into qemu_log_instr_gpr(), qemu_log_instr_cap() and similar interface
@@ -211,9 +214,6 @@ bool qemu_log_instr_check_enabled(CPUArchState *env);
 static inline bool qemu_log_instr_event_enabled(CPUArchState *env,
                                                 log_event_t *event)
 {
-    if (event->id == LOG_EVENT_MARKER) {
-        return true;
-    }
     if (event->id == LOG_EVENT_CTX_UPDATE &&
         event->ctx_update.op == LOG_EVENT_CTX_OP_SETUP) {
         return true;
@@ -336,11 +336,31 @@ void qemu_log_instr_interrupt(CPUArchState *env, uint32_t code,
                               target_ulong vector);
 
 /*
- * Log magic NOP event, we record a function number and 4 arguments.
- * Note that we have 6 bytes left in the cvtrace format, we may need
- * some trickery to reclaim those.
+ * Log extra events.
+ * XXX we can avoid a copy if we make this return a newly allocated
+ * log_event_t instead.
  */
 void qemu_log_instr_event(CPUArchState *env, log_event_t *evt);
+
+/*
+ * Each target must define this function to implement
+ * register dump events.
+ */
+bool cpu_log_instr_event_regdump(CPUArchState *env, log_event_t *evt);
+
+/*
+ * Interface to fill register dump log_event_t entries.
+ * This mirrors the qemu_log_instr_reg/cap/cap_int functions.
+ */
+void qemu_log_instr_event_create_regdump(log_event_t *evt, int nregs);
+void qemu_log_instr_event_dump_reg(log_event_t *evt, const char *reg_name,
+                                   target_ulong value);
+#ifdef TARGET_CHERI
+void qemu_log_instr_event_dump_cap(log_event_t *evt, const char *reg_name,
+                                   const cap_register_t *value);
+void qemu_log_instr_event_dump_cap_int(log_event_t *evt, const char *reg_name,
+                                       target_ulong value);
+#endif
 
 /*
  * Log extra information as a string. Some logging formats may
@@ -356,6 +376,7 @@ void qemu_log_instr_extra(CPUArchState *env, const char *msg, ...);
 #define qemu_log_instr_flush(env)
 #define qemu_log_instr_reg(...)
 #define qemu_log_instr_cap(...)
+#define qemu_log_instr_cap_int(...)
 #define qemu_log_instr_mem(...)
 #define qemu_log_instr_instr(...)
 #define qemu_log_instr_hwtid(...)

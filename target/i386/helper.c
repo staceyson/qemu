@@ -664,3 +664,10 @@ void x86_stq_phys(CPUState *cs, hwaddr addr, uint64_t val)
     address_space_stq(as, addr, val, attrs, NULL);
 }
 #endif
+
+#ifdef CONFIG_TCG_LOG_INSTR
+bool cpu_log_instr_event_regdump(CPUX86State *env, log_event_t *event)
+{
+    return true;
+}
+#endif
