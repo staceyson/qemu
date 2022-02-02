@@ -420,20 +420,23 @@ static void do_global_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
 int qemu_log_instr_global_switch(int log_flags)
 {
     CPUState *cpu;
-    qemu_log_next_level_arg_t *arg = g_new(qemu_log_next_level_arg_t, 1);
-
-    if (log_flags & CPU_LOG_INSTR_U) {
-        arg->next_level = QEMU_LOG_INSTR_LOGLEVEL_USER;
-        log_flags |= CPU_LOG_INSTR;
-    } else if (log_flags & CPU_LOG_INSTR) {
-        arg->next_level = QEMU_LOG_INSTR_LOGLEVEL_ALL;
-    } else {
-        arg->next_level = QEMU_LOG_INSTR_LOGLEVEL_NONE;
-    }
-    arg->global = true;
+    qemu_log_next_level_arg_t *arg;
 
     CPU_FOREACH(cpu)
     {
+        arg = g_new(qemu_log_next_level_arg_t, 1);
+
+        if (log_flags & CPU_LOG_INSTR_U) {
+            arg->next_level = QEMU_LOG_INSTR_LOGLEVEL_USER;
+            log_flags |= CPU_LOG_INSTR;
+        } else if (log_flags & CPU_LOG_INSTR) {
+            arg->next_level = QEMU_LOG_INSTR_LOGLEVEL_ALL;
+        } else {
+            arg->next_level = QEMU_LOG_INSTR_LOGLEVEL_NONE;
+        }
+        arg->global = true;
+
+        /* arg ownership transferred to do_global_loglevel_switch */
         async_safe_run_on_cpu(cpu, do_global_loglevel_switch,
                               RUN_ON_CPU_HOST_PTR(arg));
     }
@@ -494,7 +497,7 @@ void qemu_log_instr_init(CPUState *cpu)
     cpu_log_instr_state_t *cpulog = &cpu->log_state;
     GArray *entry_ring = g_array_sized_new(false, true, sizeof(cpu_log_entry_t),
                                            reset_entry_buffer_size);
-    qemu_log_next_level_arg_t start_level;
+    qemu_log_next_level_arg_t *start_level;
     cpu_log_entry_t *entry;
     int i;
 
@@ -531,15 +534,16 @@ void qemu_log_instr_init(CPUState *cpu)
 
     /* If we are starting with instruction logging enabled, switch it on now */
     if (qemu_loglevel_mask(CPU_LOG_INSTR | CPU_LOG_INSTR_U)) {
+        start_level = g_new(qemu_log_next_level_arg_t, 1);
         if (qemu_loglevel_mask(CPU_LOG_INSTR_U)) {
             assert(qemu_loglevel_mask(CPU_LOG_INSTR) &&
                    "CPU_LOG_INSTR_U implies CPU_LOG_INSTR broken");
-            start_level.next_level = QEMU_LOG_INSTR_LOGLEVEL_USER;
+            start_level->next_level = QEMU_LOG_INSTR_LOGLEVEL_USER;
         } else {
-            start_level.next_level = QEMU_LOG_INSTR_LOGLEVEL_ALL;
+            start_level->next_level = QEMU_LOG_INSTR_LOGLEVEL_ALL;
         }
-        start_level.global = true;
-        do_cpu_loglevel_switch(cpu, RUN_ON_CPU_HOST_PTR(&start_level));
+        start_level->global = true;
+        do_cpu_loglevel_switch(cpu, RUN_ON_CPU_HOST_PTR(start_level));
     }
 
     if (reset_filters != NULL) {
