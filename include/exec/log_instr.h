@@ -204,24 +204,6 @@ bool qemu_log_instr_check_enabled(CPUArchState *env);
     unlikely(qemu_log_instr_check_enabled((env)))
 
 /*
- * Helper macro to check whether an event should be appended to the trace or
- * not. This takes into account the event data to allow some events to be
- * appended to the current log buffer entry even when tracing is disabled. These
- * events will only become visible in the trace when tracing is started, in the
- * first log entry. This is intended to be used only for OS-driven events that
- * are relatively low-frequency w.r.t. the number of instructions executed.
- */
-static inline bool qemu_log_instr_event_enabled(CPUArchState *env,
-                                                log_event_t *event)
-{
-    if (event->id == LOG_EVENT_CTX_UPDATE &&
-        event->ctx_update.op == LOG_EVENT_CTX_OP_SETUP) {
-        return true;
-    }
-    return qemu_log_instr_check_enabled(env);
-}
-
-/*
  * Register a trace filter for a given CPU.
  */
 void qemu_log_instr_add_filter(CPUState *env, cpu_log_instr_filter_t filter);

@@ -133,14 +133,7 @@ typedef enum {
     /*
      * Switch context from the current to the new (proc, thread, compartment) ID
      */
-    LOG_EVENT_CTX_OP_SWITCH = 0,
-    /*
-     * Same as LOG_EVENT_CTX_OP_SWITCH but should bypass tracing activation
-     * status, Meaning that these events will reach the backend even when
-     * tracing is off. This is useful setup the correct context identifier
-     * before switching on tracing.
-     */
-    LOG_EVENT_CTX_OP_SETUP = 1,
+    LOG_EVENT_CTX_OP_SWITCH = 0
 } log_event_ctx_update_op_t;
 
 /*
