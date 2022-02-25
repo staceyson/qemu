@@ -63,6 +63,7 @@ typedef GEN_TYPE_PREFIX(Exc) QEMULogEntryExc;
 typedef GEN_TYPE_PREFIX() QEMULogEntry;
 typedef GEN_TYPE_PREFIX(EvtTraceState) QEMULogEntryEvtTraceState;
 typedef GEN_TYPE_PREFIX(EvtCtxUpdate) QEMULogEntryEvtCtxUpdate;
+typedef GEN_TYPE_PREFIX(EvtRegdump) QEMULogEntryEvtRegdump;
 typedef GEN_TYPE_NS(QEMULogEventTraceState) QEMULogEventTraceState;
 
 #define GEN_FN_NS(x)                        perfetto__protos__##x
@@ -179,52 +180,75 @@ static void release_protobuf_reginfo(QEMULogEntryReg *pb_reg)
 
 static void emit_protobuf_event(log_event_t *evtinfo, QEMULogEntryEvt **pb_evt)
 {
-    QEMULogEntryEvt *evt = g_malloc(sizeof(QEMULogEntryEvt));
+    QEMULogEntryEvt *pb_evt_entry = g_malloc(sizeof(QEMULogEntryEvt));
+    int i;
 
-    qemulog_entry_evt__init(evt);
+    qemulog_entry_evt__init(pb_evt_entry);
     switch (evtinfo->id) {
     case LOG_EVENT_STATE:
-        evt->event_case = ENUM_ENTRY_EVT_CASE(STATE);
-        evt->state = g_malloc(sizeof(QEMULogEntryEvtTraceState));
-        qemulog_entry_evt_trace_state__init(evt->state);
-        evt->state->next_state =
+        pb_evt_entry->event_case = ENUM_ENTRY_EVT_CASE(STATE);
+        pb_evt_entry->state = g_malloc(sizeof(QEMULogEntryEvtTraceState));
+        qemulog_entry_evt_trace_state__init(pb_evt_entry->state);
+        pb_evt_entry->state->next_state =
             (QEMULogEventTraceState)evtinfo->state.next_state;
-        evt->state->pc = evtinfo->state.pc;
+        pb_evt_entry->state->pc = evtinfo->state.pc;
         break;
     case LOG_EVENT_CTX_UPDATE:
-        evt->event_case = ENUM_ENTRY_EVT_CASE(CTX_UPDATE);
-        evt->ctx_update = g_malloc(sizeof(QEMULogEntryEvtCtxUpdate));
-        qemulog_entry_evt_ctx_update__init(evt->ctx_update);
-        evt->ctx_update->pid = evtinfo->ctx_update.pid;
-        evt->ctx_update->tid = evtinfo->ctx_update.tid;
-        evt->ctx_update->cid = evtinfo->ctx_update.cid;
+        pb_evt_entry->event_case = ENUM_ENTRY_EVT_CASE(CTX_UPDATE);
+        pb_evt_entry->ctx_update = g_malloc(sizeof(QEMULogEntryEvtCtxUpdate));
+        qemulog_entry_evt_ctx_update__init(pb_evt_entry->ctx_update);
+        pb_evt_entry->ctx_update->pid = evtinfo->ctx_update.pid;
+        pb_evt_entry->ctx_update->tid = evtinfo->ctx_update.tid;
+        pb_evt_entry->ctx_update->cid = evtinfo->ctx_update.cid;
         /* Safe to de-const cast as the pointer is only used during packing */
-        evt->ctx_update->mode =
+        pb_evt_entry->ctx_update->mode =
             (char *)cpu_get_mode_name(evtinfo->ctx_update.mode);
         break;
     case LOG_EVENT_MARKER:
-        evt->event_case = ENUM_ENTRY_EVT_CASE(MARKER);
-        evt->marker = evtinfo->marker;
+        pb_evt_entry->event_case = ENUM_ENTRY_EVT_CASE(MARKER);
+        pb_evt_entry->marker = evtinfo->marker;
         break;
-    case LOG_EVENT_REGDUMP:
-        break;
+    case LOG_EVENT_REGDUMP: {
+        log_event_regdump_t *regdump = &evtinfo->reg_dump;
+        QEMULogEntryEvtRegdump *pb_regdump =
+            g_malloc(sizeof(QEMULogEntryEvtRegdump));
+        QEMULogEntryReg **pb_regs;
+        qemulog_entry_evt_regdump__init(pb_regdump);
+
+        pb_evt_entry->event_case = ENUM_ENTRY_EVT_CASE(REGDUMP);
+        pb_evt_entry->regdump = pb_regdump;
+        pb_regdump->n_regs = regdump->gpr->len;
+        pb_regs = g_malloc(regdump->gpr->len * sizeof(QEMULogEntryReg *));
+        pb_regdump->regs = pb_regs;
+        for (i = 0; i < regdump->gpr->len; i++, pb_regs++) {
+            log_reginfo_t *rinfo =
+                &g_array_index(regdump->gpr, log_reginfo_t, i);
+            emit_protobuf_reginfo(rinfo, pb_regs);
+        }
+    } break;
     default:
         assert(0 && "unknown event ID");
     }
-    *pb_evt = evt;
+    *pb_evt = pb_evt_entry;
 }
 
 static void release_protobuf_event(QEMULogEntryEvt *pb_evt)
 {
+    int i;
+
     if (pb_evt->event_case == ENUM_ENTRY_EVT_CASE(STATE)) {
         g_free(pb_evt->state);
     }
     if (pb_evt->event_case == ENUM_ENTRY_EVT_CASE(CTX_UPDATE)) {
         g_free(pb_evt->ctx_update);
     }
-    /* if (pb_evt->event_case == ENUM_ENTRY_EVT_CASE(REGDUMP)) { */
-    /*     g_free(pb_evt->regdump); */
-    /* } */
+    if (pb_evt->event_case == ENUM_ENTRY_EVT_CASE(REGDUMP)) {
+        for (i = 0; i < pb_evt->regdump->n_regs; i++) {
+            release_protobuf_reginfo(pb_evt->regdump->regs[i]);
+        }
+        g_free(pb_evt->regdump->regs);
+        g_free(pb_evt->regdump);
+    }
     g_free(pb_evt);
 }
 
