@@ -213,8 +213,7 @@ void process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
         } break;
         case LOG_EVENT_CTX_UPDATE: {
             /* Swap current context. */
-            if (evt->ctx_update.op == LOG_EVENT_CTX_OP_SETUP ||
-                evt->ctx_update.op == LOG_EVENT_CTX_OP_SWITCH) {
+            if (evt->ctx_update.op == LOG_EVENT_CTX_OP_SWITCH) {
                 ctx_data->stats.pause(*ctx_track, perfetto_log_entry_pc(entry));
                 data->ctx_tracker_.context_update(&evt->ctx_update);
                 /* Reload data and track as context_update will have changed

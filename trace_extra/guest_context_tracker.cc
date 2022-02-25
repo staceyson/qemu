@@ -138,9 +138,7 @@ void guest_context_tracker::mode_update(
 void guest_context_tracker::context_update(const log_event_ctx_update_t *evt)
 {
     // Currently these are the only ones existing
-    assert((evt->op == LOG_EVENT_CTX_OP_SWITCH ||
-            evt->op == LOG_EVENT_CTX_OP_SETUP) &&
-           "Invalid ctx update op");
+    assert((evt->op == LOG_EVENT_CTX_OP_SWITCH) && "Invalid ctx update op");
     /*
      * Find or create the track associated with the new context and set it as
      * the current context track on the CPU. This will be used to log
