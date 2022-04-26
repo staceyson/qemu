@@ -275,6 +275,9 @@ void emit_json_entry(CPUArchState *env, cpu_log_entry_t *entry)
             case LOG_EVENT_REGDUMP:
                 emit_json_evt_regdump(&event->reg_dump, js_evt);
                 break;
+            case LOG_EVENT_COUNTER:
+                /* TODO Unimpl */
+                break;
             default:
                 assert(0 && "unknown event ID");
             }

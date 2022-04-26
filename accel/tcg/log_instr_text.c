@@ -121,6 +121,7 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
     const log_event_t *event;
     const char *log_state_op;
     int i, j;
+    bool incremental;
 
     if (entry->flags & LI_FLAG_HAS_INSTR_DATA) {
         /* Dump CPU-ID:ASID + address */
@@ -227,6 +228,14 @@ void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry)
                     &g_array_index(event->reg_dump.gpr, log_reginfo_t, j);
                 emit_text_reg(r);
             }
+            break;
+        case LOG_EVENT_COUNTER:
+            incremental = log_event_counter_incremental(event->counter.flags);
+            qemu_log("Counter %s %s[%d]: %lx\n", (incremental) ? "INC" : "ABS",
+                     event->counter.name,
+                     log_event_counter_slot(event->counter.flags),
+                     event->counter.value);
+            break;
         default:
             assert(0 && "unknown event ID");
         }

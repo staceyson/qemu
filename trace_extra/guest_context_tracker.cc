@@ -37,13 +37,12 @@ namespace cheri
 
 /*
  * Dynamically created tracks and track data.
- * The tracks lock protects both tracks and ctx_data.
+ * The track_state_lock must be held for updating the track_state map.
  */
-std::mutex tracks_lock;
-std::unordered_map<qemu_context_track::qemu_ctx_id,
-                   std::shared_ptr<qemu_context_track>,
-                   cheri::tuple_hasher<qemu_context_track::qemu_ctx_id>>
-    tracks;
+std::mutex track_state_lock;
+std::unordered_map<qemu_ctx_id, std::shared_ptr<qemu_context_state>,
+                   tuple_hasher<qemu_ctx_id>>
+    track_state_map;
 
 /* Helper to generate unique IDs for dynamic tracks */
 unsigned long gen_track_uuid()
@@ -61,16 +60,24 @@ qemu_cpu_mode_to_trace(qemu_log_instr_cpu_mode_t mode)
     return static_cast<perfetto::protos::pbzero::QEMULogEntryModeSwitch>(mode);
 }
 
-/* static */
-std::shared_ptr<qemu_context_track>
-qemu_context_track::make_context_track(qemu_ctx_id key)
+qemu_cpu_track::qemu_cpu_track(int id)
+    : perfetto::Track(gen_track_uuid(), perfetto::Track()), cpu_id(id)
 {
-    return std::make_shared<qemu_context_track>(key);
 }
 
-qemu_context_track::qemu_ctx_id qemu_context_track::get_id() const
+perfetto::protos::gen::TrackDescriptor qemu_cpu_track::Serialize() const
 {
-    return std::make_tuple(pid, tid, cid, mode);
+    auto desc = Track::Serialize();
+    std::string name("CPU " + std::to_string(cpu_id));
+    desc.set_name(name);
+    return desc;
+}
+
+void qemu_cpu_track::Serialize(
+    perfetto::protos::pbzero::TrackDescriptor *desc) const
+{
+    auto bytes = Serialize().SerializeAsString();
+    desc->AppendRawProtoBytes(bytes.data(), bytes.size());
 }
 
 perfetto::protos::gen::TrackDescriptor qemu_context_track::Serialize() const
@@ -81,58 +88,54 @@ perfetto::protos::gen::TrackDescriptor qemu_context_track::Serialize() const
     cheri_desc->set_tid(tid);
     cheri_desc->set_cid(cid);
     cheri_desc->set_el(mode);
+    desc.set_name("CTX " + std::to_string(pid) + ":" + std::to_string(tid) +
+                  ":" + std::to_string(cid) + ":" + std::to_string(mode));
     return desc;
 }
 
+void qemu_context_track::Serialize(
+    perfetto::protos::pbzero::TrackDescriptor *desc) const
+{
+    auto bytes = Serialize().SerializeAsString();
+    desc->AppendRawProtoBytes(bytes.data(), bytes.size());
+}
+
 qemu_context_track::qemu_context_track(qemu_ctx_id key)
-    : perfetto::Track(cheri::gen_track_uuid(), perfetto::Track()),
+    : perfetto::Track(gen_track_uuid(), perfetto::Track()),
       pid(std::get<0>(key)), tid(std::get<1>(key)), cid(std::get<2>(key)),
       mode(std::get<3>(key))
 {
 }
 
-qemu_context_track::~qemu_context_track()
+qemu_ctx_id qemu_context_track::get_id() const
 {
-    perfetto::TrackEvent::EraseTrackDescriptor(*this);
+    return std::make_tuple(pid, tid, cid, mode);
 }
 
-guest_context_tracker::guest_context_tracker(int cpu_id)
-    : cpu_track_(perfetto::Track::Global(gen_track_uuid()))
-{
-    std::string track_name("CPU " + std::to_string(cpu_id));
-    auto desc = cpu_track_.Serialize();
-    desc.set_name(track_name);
-    perfetto::TrackEvent::SetTrackDescriptor(cpu_track_, desc);
-}
+guest_context_tracker::guest_context_tracker(int cpu_id) : cpu_state(cpu_id) {}
 
 void guest_context_tracker::mode_update(
     perfetto::protos::pbzero::QEMULogEntryModeSwitch new_mode)
 {
-    if (ctx_track_ == nullptr)
+    if (ctx_state == nullptr)
         return;
 
-    auto key = ctx_track_->get_id();
+    auto key = ctx_state->track.get_id();
     std::get<3>(key) = new_mode;
     /* Check if we have a track for this mode */
-    std::shared_ptr<qemu_context_track> track;
+    std::shared_ptr<qemu_context_state> state;
     {
-        std::lock_guard<std::mutex> tracks_guard(tracks_lock);
-        auto found_track_iter = tracks.find(key);
-        if (found_track_iter == tracks.end()) {
-            track = qemu_context_track::make_context_track(key);
-            auto desc = track->Serialize();
-            desc.set_name("CTX " + std::to_string(track->pid) + ":" +
-                          std::to_string(track->tid) + ":" +
-                          std::to_string(track->cid) + ":" +
-                          std::to_string(track->mode));
-            perfetto::TrackEvent::SetTrackDescriptor(*track, desc);
-            tracks.emplace(key, track);
+        std::lock_guard<std::mutex> track_state_guard(track_state_lock);
+        auto it = track_state_map.find(key);
+        if (it == track_state_map.end()) {
+            state = std::make_shared<qemu_context_state>(key);
+            track_state_map.emplace(key, state);
         } else {
             /* Existing context */
-            track = found_track_iter->second;
+            state = it->second;
         }
     }
-    ctx_track_ = track;
+    ctx_state = state;
 }
 
 void guest_context_tracker::context_update(const log_event_ctx_update_t *evt)
@@ -150,59 +153,44 @@ void guest_context_tracker::context_update(const log_event_ctx_update_t *evt)
 
     auto mode = qemu_cpu_mode_to_trace(evt->mode);
     /* Fetch the tracks for the new context */
-    qemu_context_track::qemu_ctx_id key =
-        std::make_tuple(evt->pid, evt->tid, evt->cid, mode);
-    std::shared_ptr<qemu_context_track> track;
+    qemu_ctx_id key = std::make_tuple(evt->pid, evt->tid, evt->cid, mode);
+    std::shared_ptr<qemu_context_state> state;
     {
-        std::lock_guard<std::mutex> tracks_guard(tracks_lock);
-        auto ctx_track_iter = tracks.find(key);
-        if (ctx_track_iter == tracks.end()) {
-            /* New context */
-            track = qemu_context_track::make_context_track(key);
-            auto desc = track->Serialize();
-            desc.set_name("CTX " + std::to_string(evt->pid) + ":" +
-                          std::to_string(evt->tid) + ":" +
-                          std::to_string(evt->cid) + ":" +
-                          std::to_string(mode));
-            perfetto::TrackEvent::SetTrackDescriptor(*track, desc);
-            tracks.emplace(key, track);
+        std::lock_guard<std::mutex> track_state_guard(track_state_lock);
+        auto it = track_state_map.find(key);
+        if (it == track_state_map.end()) {
+            state = std::make_shared<qemu_context_state>(key);
+            track_state_map.emplace(key, state);
         } else {
             /* Existing context */
-            track = ctx_track_iter->second;
+            state = it->second;
         }
     }
-    ctx_track_ = track;
+    ctx_state = state;
 }
 
 void guest_context_tracker::flush_all_ctx_data()
 {
     /* Flush per-CPU stats */
-    cpu_ctx_data_.stats.flush(cpu_track_);
-    for (auto &id_and_track : tracks) {
-        qemu_context_data &ctx_data = id_and_track.second->ctx_data;
-        ctx_data.stats.flush(*id_and_track.second);
+    cpu_state.stats.flush(cpu_state.track);
+    std::lock_guard<std::mutex> track_state_guard(track_state_lock);
+    for (auto id_and_state : track_state_map) {
+        qemu_stats &stats = id_and_state.second->stats;
+        stats.flush(id_and_state.second->track);
     }
 }
 
-perfetto::Track &guest_context_tracker::get_cpu_track()
+qemu_fallback_state *guest_context_tracker::get_cpu_state()
 {
-    return cpu_track_;
+    return &cpu_state;
 }
 
-perfetto::Track &guest_context_tracker::get_ctx_track()
+qemu_tracker_state *guest_context_tracker::get_ctx_state()
 {
-    if (ctx_track_)
-        return *ctx_track_;
+    if (ctx_state)
+        return ctx_state.get();
     else
-        return cpu_track_;
-}
-
-qemu_context_data &guest_context_tracker::get_ctx_data()
-{
-    if (ctx_track_)
-        return ctx_track_->ctx_data;
-    else
-        return cpu_ctx_data_;
+        return &cpu_state;
 }
 
 } // namespace cheri

@@ -47,6 +47,8 @@
 #define QEMU_LOG_PRINTF_BUF_DEPTH 32
 /* Early flush if buffer gets this full. */
 #define QEMU_LOG_PRINTF_FLUSH_BARRIER 32
+/* Max name size for qemu counters and other events */
+#define QEMU_LOG_EVENT_MAX_NAMELEN 64
 
 /*
  * Instruction logging format
@@ -113,6 +115,7 @@ typedef enum {
     LOG_EVENT_CTX_UPDATE = 1,
     LOG_EVENT_MARKER = 2,
     LOG_EVENT_REGDUMP = 3,
+    LOG_EVENT_COUNTER = 4,
 } log_event_id_t;
 
 /*
@@ -161,6 +164,20 @@ typedef struct {
 } log_event_regdump_t;
 
 /*
+ * Counter event.
+ * This represents an arbitrary named counter. Generally driven from the
+ * guest OS via NOPs, but can also be generated internally.
+ */
+typedef struct {
+    char name[QEMU_LOG_EVENT_MAX_NAMELEN];
+    int64_t value;
+    uint64_t flags;
+} log_event_counter_t;
+
+#define log_event_counter_slot(flags)        (flags & 0xffff)
+#define log_event_counter_incremental(flags) ((flags >> 32) & 0x01)
+
+/*
  * Trace event.
  * This records arbitrary higher-level events associated with instruction
  * entries.
@@ -181,6 +198,7 @@ typedef struct {
         log_event_ctx_update_t ctx_update;
         log_event_regdump_t reg_dump;
         uint64_t marker;
+        log_event_counter_t counter;
     };
 } log_event_t;
 
@@ -242,9 +260,9 @@ typedef struct qemu_log_instr_stats {
     uint64_t trace_stop;
 } qemu_log_instr_stats_t;
 
-#define QEMU_LOG_INSTR_INC_STAT(cpu_state, stat) \
-    do {                                         \
-        cpu_state->stats.stat++;                 \
+#define QEMU_LOG_INSTR_INC_STAT(cpu_state, stat)                               \
+    do {                                                                       \
+        cpu_state->stats.stat++;                                               \
     } while (0)
 
 /*

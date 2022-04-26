@@ -77,7 +77,6 @@ DEF_HELPER_3(sc_c_cap, tl, env, i32, i32)
 DEF_HELPER_FLAGS_3(riscv_log_gpr_write, TCG_CALL_NO_RWG, void, env, i32, tl)
 DEF_HELPER_FLAGS_4(riscv_log_instr, TCG_CALL_NO_RWG, void, env, tl, i32, i32)
 DEF_HELPER_FLAGS_2(riscv_log_instr_event, TCG_CALL_NO_RWG, void, env, tl)
-DEF_HELPER_FLAGS_1(riscv_log_instr_regdump, TCG_CALL_NO_RWG, void, env)
 #endif
 
 /* Special functions */

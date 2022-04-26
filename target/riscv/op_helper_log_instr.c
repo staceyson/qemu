@@ -45,6 +45,29 @@
 #define get_gpr_value(env, regnum) (env->gpr[regnum])
 #endif
 
+/*
+ * Read a null-terminated guest string without requiring a strlen() in
+ * the guest. This is probably slower but does not perturb guest call-graph.
+ */
+static int read_guest_cstring(CPURISCVState *env, target_ulong vaddr,
+                              char *buffer, size_t maxlen)
+{
+    int ret = 0;
+
+    buffer[maxlen - 1] = '\0';
+    while (maxlen > 1) {
+        ret = cpu_memory_rw_debug(env_cpu(env), vaddr, buffer, 1, false);
+        if (ret != 0 || *buffer == '\0') {
+            break;
+        }
+        maxlen--;
+        vaddr++;
+        buffer++;
+    }
+
+    return ret;
+}
+
 void HELPER(riscv_log_gpr_write)(CPURISCVState *env, uint32_t regnum,
                                  target_ulong value)
 {
@@ -78,6 +101,8 @@ void HELPER(riscv_log_instr)(CPURISCVState *env, target_ulong pc,
 void HELPER(riscv_log_instr_event)(CPURISCVState *env, target_ulong pc)
 {
     log_event_t event;
+    target_ulong vaddr;
+    int ret;
 
     event.id = get_gpr_value(env, 10);
 
@@ -95,6 +120,18 @@ void HELPER(riscv_log_instr_event)(CPURISCVState *env, target_ulong pc)
             break;
         case LOG_EVENT_REGDUMP:
             cpu_log_instr_event_regdump(env, &event);
+            break;
+        case LOG_EVENT_COUNTER:
+            vaddr = get_gpr_value(env, 11);
+            ret = read_guest_cstring(env, vaddr, (char *)event.counter.name,
+                                     sizeof(event.counter.name));
+            if (ret != 0) {
+                warn_report("LOG EVENT HELPER: Could not read guest string at"
+                            " vaddr 0x" TARGET_FMT_lx, vaddr);
+                return;
+            }
+            event.counter.value = (int64_t)get_gpr_value(env, 12);
+            event.counter.flags = get_gpr_value(env, 13);
             break;
         default:
             warn_report("Unsupported event ID for TCG instr logging %d",
@@ -138,18 +175,4 @@ bool cpu_log_instr_event_regdump(CPURISCVState *env, log_event_t *event)
     }
 
     return false;
-}
-
-/*
- * Emit a register dump event.
- * Only dump general purpose registers for now. No fpu, vector or CPU registers.
- */
-void HELPER(riscv_log_instr_regdump)(CPURISCVState *env)
-{
-    log_event_t event;
-
-    if (qemu_log_instr_enabled(env)) {
-        cpu_log_instr_event_regdump(env, &event);
-        qemu_log_instr_event(env, &event);
-    }
 }

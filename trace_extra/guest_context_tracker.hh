@@ -29,6 +29,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <iterator>
 #include <utility>
 #include <perfetto.h>
@@ -39,35 +40,84 @@
 namespace cheri
 {
 
+using cpu_mode_type = perfetto::protos::pbzero::QEMULogEntryModeSwitch;
+/* (pid, tid, cid, mode) */
+using qemu_ctx_id = std::tuple<uint64_t, uint64_t, uint64_t, cpu_mode_type>;
+
 /*
- * Per-context data.
- * This is allocated and switched together with the context track.
+ * Custom track representing a QEMU guest context.
  */
-struct qemu_context_data {
-    qemu_stats stats;
-};
-
 struct qemu_context_track : public perfetto::Track {
-
-    using cpu_mode_type = perfetto::protos::pbzero::QEMULogEntryModeSwitch;
-    /* (pid, tid, cid, mode) */
-    using qemu_ctx_id = std::tuple<uint64_t, uint64_t, uint64_t, cpu_mode_type>;
-
     const uint64_t pid;
     const uint64_t tid;
     const uint64_t cid;
     const cpu_mode_type mode;
-    qemu_context_data ctx_data;
-
-    static std::shared_ptr<qemu_context_track>
-    make_context_track(qemu_ctx_id key);
 
     qemu_ctx_id get_id() const;
+    perfetto::protos::gen::TrackDescriptor Serialize() const;
+    void Serialize(perfetto::protos::pbzero::TrackDescriptor *desc) const;
+    qemu_context_track(qemu_ctx_id key);
+};
+
+/*
+ * Custom track representing a QEMU vcpu.
+ */
+struct qemu_cpu_track : public perfetto::Track {
+    const int cpu_id;
 
     perfetto::protos::gen::TrackDescriptor Serialize() const;
+    void Serialize(perfetto::protos::pbzero::TrackDescriptor *desc) const;
+    qemu_cpu_track(int id);
+};
 
-    qemu_context_track(qemu_ctx_id key);
-    ~qemu_context_track();
+/*
+ * Common CPU and context data.
+ */
+struct qemu_tracker_state {
+    qemu_stats stats;
+
+    virtual perfetto::Track *get_track() = 0;
+    virtual ~qemu_tracker_state() = default;
+};
+
+struct qemu_context_state : public qemu_tracker_state {
+    qemu_context_track track;
+
+    qemu_context_state(qemu_ctx_id id) : track(id)
+    {
+        auto desc = track.Serialize();
+        perfetto::TrackEvent::SetTrackDescriptor(track, desc);
+    }
+
+    ~qemu_context_state()
+    {
+        perfetto::TrackEvent::EraseTrackDescriptor(track);
+    }
+
+    perfetto::Track *get_track()
+    {
+        return &track;
+    }
+};
+
+struct qemu_fallback_state : public qemu_tracker_state {
+    qemu_cpu_track track;
+
+    qemu_fallback_state(int id) : track(id)
+    {
+        auto desc = track.Serialize();
+        perfetto::TrackEvent::SetTrackDescriptor(track, desc);
+    }
+
+    ~qemu_fallback_state()
+    {
+        perfetto::TrackEvent::EraseTrackDescriptor(track);
+    }
+
+    perfetto::Track *get_track()
+    {
+        return &track;
+    }
 };
 
 /*
@@ -95,21 +145,18 @@ struct qemu_context_track : public perfetto::Track {
  */
 class guest_context_tracker
 {
-    /* CPU track for events not assigned (or assignable) to a single context */
-    perfetto::Track cpu_track_;
-    /* context data for the CPU track */
-    qemu_context_data cpu_ctx_data_;
-    /* Currently active context track */
-    std::shared_ptr<qemu_context_track> ctx_track_;
+    /* CPU tracks and fallback data */
+    qemu_fallback_state cpu_state;
+    /* Currently active context data */
+    std::shared_ptr<qemu_context_state> ctx_state;
 
   public:
     guest_context_tracker(int cpu_id);
     void context_update(const log_event_ctx_update_t *evt);
     void mode_update(perfetto::protos::pbzero::QEMULogEntryModeSwitch new_mode);
     void flush_all_ctx_data();
-    perfetto::Track &get_cpu_track();
-    perfetto::Track &get_ctx_track();
-    qemu_context_data &get_ctx_data();
+    qemu_fallback_state *get_cpu_state();
+    qemu_tracker_state *get_ctx_state();
 };
 
 /*

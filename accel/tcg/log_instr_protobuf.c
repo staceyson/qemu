@@ -226,6 +226,8 @@ static void emit_protobuf_event(log_event_t *evtinfo, QEMULogEntryEvt **pb_evt)
             emit_protobuf_reginfo(rinfo, pb_regs);
         }
     } break;
+    case LOG_EVENT_COUNTER:
+        break;
     default:
         assert(0 && "unknown event ID");
     }
