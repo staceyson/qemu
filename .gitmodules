@@ -68,3 +68,5 @@
 	path = trace_extra/cheri-perfetto
 	url = https://github.com/qwattash/cheri-perfetto.git
 	branch = cheri-perfetto
+[submodule "cheri-perfetto"]
+	url = https://github.com/CTSRD-CHERI/cheri-perfetto.git
