@@ -57,13 +57,15 @@ PERFETTO_DEFINE_CATEGORIES(
     perfetto::Category("instructions")
         .SetDescription("CPU instructions executed"),
     perfetto::Category("memory").SetDescription("Tag and memory load/store"),
-    perfetto::Category("stats").SetDescription("High-level statistics data"),
     perfetto::Category("ctrl").SetDescription("Tracing control events"),
     perfetto::Category("trap").SetDescription("CPU trap events"),
     perfetto::Category("sched").SetDescription("Scheduling events"),
     perfetto::Category("marker").SetDescription(
         "Guest trace timestamp markers"),
-    perfetto::Category("counter").SetDescription("Guest-driven counters"));
+    perfetto::Category("counter").SetDescription("Guest-driven counters"),
+    perfetto::Category("bb_hit").SetDescription("Basic Block hit counts"),
+    perfetto::Category("bb_icount").SetDescription("Basic Block instr counts"),
+    perfetto::Category("br_hit").SetDescription("Branch hit count"));
 #endif
 
 /*

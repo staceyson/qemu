@@ -26,7 +26,6 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
-#include <cstdio>
 #include "trace_extra/trace_counters.hh"
 #include "trace_extra/guest_context_tracker.hh"
 

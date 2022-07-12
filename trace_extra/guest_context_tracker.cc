@@ -27,10 +27,17 @@
  */
 
 #include <atomic>
+#include <limits>
 #include <mutex>
+#include <random>
 #include <string>
+#include <utility>
 #include <unordered_map>
 #include "trace_extra/guest_context_tracker.hh"
+
+namespace icl = boost::icl;
+
+using addr_range = icl::interval<uint64_t>;
 
 namespace cheri
 {
@@ -47,9 +54,26 @@ std::unordered_map<qemu_ctx_id, std::shared_ptr<qemu_context_state>,
 /* Helper to generate unique IDs for dynamic tracks */
 unsigned long gen_track_uuid()
 {
-    // use perfetto::Uuid?
-    static std::atomic<unsigned long> next_track_id(0xdead);
-    return (next_track_id++);
+    static std::mutex rnd_mutex;
+    static std::random_device rand_dev;
+    static std::mt19937_64 rand_gen(rand_dev());
+    static std::uniform_int_distribution<unsigned long> track_uuid_gen(
+        0ul, std::numeric_limits<unsigned long>::max());
+
+    {
+        const std::lock_guard<std::mutex> lock(rnd_mutex);
+        return track_uuid_gen(rand_gen);
+    }
+}
+
+std::string ctx_track_name(qemu_ctx_id key)
+{
+    uint64_t pid = std::get<0>(key);
+    uint64_t tid = std::get<1>(key);
+    uint64_t cid = std::get<2>(key);
+    int mode = std::get<3>(key);
+    return "CTX " + std::to_string(pid) + ":" + std::to_string(tid) + ":" +
+           std::to_string(cid) + ":" + std::to_string(mode);
 }
 
 perfetto::protos::pbzero::QEMULogEntryModeSwitch
@@ -88,8 +112,7 @@ perfetto::protos::gen::TrackDescriptor qemu_context_track::Serialize() const
     cheri_desc->set_tid(tid);
     cheri_desc->set_cid(cid);
     cheri_desc->set_el(mode);
-    desc.set_name("CTX " + std::to_string(pid) + ":" + std::to_string(tid) +
-                  ":" + std::to_string(cid) + ":" + std::to_string(mode));
+    desc.set_name(name);
     return desc;
 }
 
@@ -103,7 +126,7 @@ void qemu_context_track::Serialize(
 qemu_context_track::qemu_context_track(qemu_ctx_id key)
     : perfetto::Track(gen_track_uuid(), perfetto::Track()),
       pid(std::get<0>(key)), tid(std::get<1>(key)), cid(std::get<2>(key)),
-      mode(std::get<3>(key))
+      mode(std::get<3>(key)), name(ctx_track_name(key))
 {
 }
 
@@ -112,9 +135,75 @@ qemu_ctx_id qemu_context_track::get_id() const
     return std::make_tuple(pid, tid, cid, mode);
 }
 
+void qemu_bb_tracker::track_next(cpu_log_entry_handle entry, uint64_t pc)
+{
+    if (pc == 0) {
+        pc = perfetto_log_entry_pc(entry);
+    }
+    int size = perfetto_log_entry_insn_size(entry);
+    /* When resuming after reset accept anything as a next instruction */
+    if (bb_start == 0) {
+        bb_start = pc;
+        bb_icount = 0;
+    } else if (pc != next_pc && next_pc != 0) {
+        /* Presume we are branching */
+        assert(bb_start != 0 && "PC bb start was not updated");
+        assert(last_pc != 0 && "last_pc can not be zero");
+        /* Update basic block info */
+        bb_map += std::make_pair(addr_range::right_open(bb_start, last_pc),
+                                 bb_value(1ul, bb_icount));
+        /* Update branch info */
+        branch_id bid = std::make_pair(last_pc, pc);
+        branch_map[bid] += 1;
+        /* Reset */
+        bb_start = pc;
+        bb_icount = 0;
+    }
+    bb_icount += 1;
+    next_pc = pc + size;
+    last_pc = pc;
+}
+
+void qemu_bb_tracker::reset(uint64_t pc)
+{
+    if (bb_start == 0) {
+        /* Nothing to flush */
+        return;
+    }
+    /* With pc=0 flush discarding any currently active bb */
+    if (pc != 0) {
+        bb_map += std::make_pair(addr_range::right_open(bb_start, pc),
+                                 bb_value(1ul, bb_icount));
+    }
+    bb_start = bb_icount = next_pc = last_pc = 0;
+
+    /* XXX-AM: Somewhat arbitrary tuning constant, depend on the SHM size */
+    if (boost::icl::interval_count(bb_map) > 5000 || branch_map.size() > 5000)
+        flush();
+}
+
+void qemu_bb_tracker::flush()
+{
+    for (const auto &keyval : bb_map) {
+        auto &interval = keyval.first;
+        TRACE_INTERVAL("bb_hit", track, interval.lower(), interval.upper(),
+                       keyval.second.hit);
+        TRACE_INTERVAL("bb_icount", track, interval.lower(), interval.upper(),
+                       keyval.second.icount);
+    }
+    for (const auto &keyval : branch_map) {
+        auto &bid = keyval.first;
+        TRACE_INTERVAL("br_hit", track, std::get<0>(bid), std::get<1>(bid),
+                       keyval.second);
+    }
+    bb_map.clear();
+    branch_map.clear();
+}
+
 guest_context_tracker::guest_context_tracker(int cpu_id) : cpu_state(cpu_id) {}
 
 void guest_context_tracker::mode_update(
+    cpu_log_entry_handle entry,
     perfetto::protos::pbzero::QEMULogEntryModeSwitch new_mode)
 {
     if (ctx_state == nullptr)
@@ -135,10 +224,15 @@ void guest_context_tracker::mode_update(
             state = it->second;
         }
     }
+    if (ctx_state && ctx_state != state) {
+        /* We are changing context */
+        ctx_state->bb_tracker->reset(perfetto_log_entry_pc(entry));
+    }
     ctx_state = state;
 }
 
-void guest_context_tracker::context_update(const log_event_ctx_update_t *evt)
+void guest_context_tracker::context_update(cpu_log_entry_handle entry,
+                                           const log_event_ctx_update_t *evt)
 {
     // Currently these are the only ones existing
     assert((evt->op == LOG_EVENT_CTX_OP_SWITCH) && "Invalid ctx update op");
@@ -166,17 +260,29 @@ void guest_context_tracker::context_update(const log_event_ctx_update_t *evt)
             state = it->second;
         }
     }
+    if (ctx_state && ctx_state != state) {
+        /* We are changing context */
+        ctx_state->bb_tracker->reset(perfetto_log_entry_pc(entry));
+    }
     ctx_state = state;
 }
 
-void guest_context_tracker::flush_all_ctx_data()
+void guest_context_tracker::flush_all_ctx_data(uint64_t pc)
 {
-    /* Flush per-CPU stats */
-    cpu_state.stats.flush(cpu_state.track);
+    /* Flush per-CPU and current context stats */
+    cpu_state.bb_tracker->reset(pc);
+    cpu_state.bb_tracker->flush();
+    if (ctx_state) {
+        ctx_state->bb_tracker->reset(pc);
+        ctx_state->bb_tracker->flush();
+    }
     std::lock_guard<std::mutex> track_state_guard(track_state_lock);
     for (auto id_and_state : track_state_map) {
-        qemu_stats &stats = id_and_state.second->stats;
-        stats.flush(id_and_state.second->track);
+        qemu_bb_tracker *bb_tracker = id_and_state.second->bb_tracker.get();
+        if (bb_tracker != ctx_state->bb_tracker.get()) {
+            bb_tracker->reset(0);
+            bb_tracker->flush();
+        }
     }
 }
 
