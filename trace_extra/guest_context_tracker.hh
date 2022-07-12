@@ -36,6 +36,7 @@
 #include "qemu/log_instr.h"
 #include "exec/log_instr_perfetto.h"
 #include "trace_extra/trace_stats.hh"
+#include "trace_extra/trace_counters.hh"
 
 namespace cheri
 {
@@ -82,8 +83,9 @@ struct qemu_tracker_state {
 
 struct qemu_context_state : public qemu_tracker_state {
     qemu_context_track track;
+    qemu_counters_state counters;
 
-    qemu_context_state(qemu_ctx_id id) : track(id)
+    qemu_context_state(qemu_ctx_id id) : track(id), counters(track)
     {
         auto desc = track.Serialize();
         perfetto::TrackEvent::SetTrackDescriptor(track, desc);
@@ -102,8 +104,9 @@ struct qemu_context_state : public qemu_tracker_state {
 
 struct qemu_fallback_state : public qemu_tracker_state {
     qemu_cpu_track track;
+    qemu_counters_state counters;
 
-    qemu_fallback_state(int id) : track(id)
+    qemu_fallback_state(int id) : track(id), counters(track)
     {
         auto desc = track.Serialize();
         perfetto::TrackEvent::SetTrackDescriptor(track, desc);

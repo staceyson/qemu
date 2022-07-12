@@ -42,9 +42,10 @@ qemu_counters_state global_counters;
 
 } // namespace
 
-qemu_counter_track::qemu_counter_track(uint64_t uuid_, qemu_counter_id id)
-        : perfetto::Track(uuid_, perfetto::Track()), name(std::get<0>(id)),
-          slot(std::get<1>(id))
+qemu_counter_track::qemu_counter_track(uint64_t uuid_, qemu_counter_id id,
+                                       perfetto::Track parent)
+    : perfetto::Track(uuid_, parent), name(std::get<0>(id)),
+      slot(std::get<1>(id))
 {
 }
 
@@ -65,8 +66,9 @@ void qemu_counter_track::Serialize(
     desc->AppendRawProtoBytes(bytes.data(), bytes.size());
 }
 
-qemu_counter::qemu_counter(qemu_counter_id id, int64_t reset)
-        : track(gen_track_uuid(), id), value(reset)
+qemu_counter::qemu_counter(qemu_counter_id id, int64_t reset,
+                           perfetto::Track parent)
+    : track(gen_track_uuid(), id, parent), value(reset)
 {
     auto desc = track.Serialize();
     perfetto::TrackEvent::SetTrackDescriptor(track, desc);
@@ -100,8 +102,8 @@ bool qemu_counters_state::try_set(qemu_counter_id id, int64_t value)
     return true;
 }
 
-boost::optional<int64_t>
-qemu_counters_state::try_fetch_add(qemu_counter_id id, int64_t value)
+boost::optional<int64_t> qemu_counters_state::try_fetch_add(qemu_counter_id id,
+                                                            int64_t value)
 {
     std::shared_lock<std::shared_timed_mutex> lock(mutex);
     auto it = counters.find(id);
@@ -120,7 +122,8 @@ void qemu_counters_state::set(qemu_counter_id id, int64_t value)
         std::unique_lock<std::shared_timed_mutex> lock(mutex);
         auto it = counters.find(id);
         if (it == counters.end()) {
-            auto counter = std::make_unique<qemu_counter>(id, value);
+            auto counter =
+                std::make_unique<qemu_counter>(id, value, parent_track);
             auto emplaced = counters.emplace(id, std::move(counter));
             it = emplaced.first;
         } else {
@@ -138,7 +141,8 @@ int64_t qemu_counters_state::inc(qemu_counter_id id, int64_t value)
         std::unique_lock<std::shared_timed_mutex> lock(mutex);
         auto it = counters.find(id);
         if (it == counters.end()) {
-            auto counter = std::make_unique<qemu_counter>(id, value);
+            auto counter =
+                std::make_unique<qemu_counter>(id, value, parent_track);
             auto emplaced = counters.emplace(id, std::move(counter));
             it = emplaced.first;
         } else {

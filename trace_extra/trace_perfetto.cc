@@ -319,13 +319,14 @@ void process_events(perfetto_backend_data *data, cpu_log_entry_handle entry)
 
 void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
 {
+    auto *state = data->ctx_tracker.get_ctx_state();
+
     /*
      * XXX-AM: instead of having one big instruction record, we may have
      * different messages for optional parts of the instruction message, on the
      * same track/category: e.g. mode swtich, interrupt information and modified
      * registers?
      */
-    auto *state = data->ctx_tracker.get_ctx_state();
     TRACE_EVENT_INSTANT(
         "instructions", "stream", *state->get_track(),
         [&](perfetto::EventContext ctx) {

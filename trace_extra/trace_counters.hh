@@ -60,7 +60,8 @@ class qemu_counter_track : public perfetto::Track
   public:
     void Serialize(perfetto::protos::pbzero::TrackDescriptor *) const;
     perfetto::protos::gen::TrackDescriptor Serialize() const;
-    qemu_counter_track(uint64_t uuid_, qemu_counter_id id);
+    qemu_counter_track(uint64_t uuid_, qemu_counter_id id,
+                       perfetto::Track parent);
 };
 
 struct qemu_counter {
@@ -68,7 +69,7 @@ struct qemu_counter {
     std::atomic<int64_t> value;
 
     void emit(int64_t sample) const;
-    qemu_counter(qemu_counter_id id, int64_t reset);
+    qemu_counter(qemu_counter_id id, int64_t reset, perfetto::Track parent);
     qemu_counter(const qemu_counter &other) = delete;
     ~qemu_counter();
 };
@@ -82,10 +83,12 @@ struct qemu_counter {
  */
 class qemu_counters_state
 {
-    /* The lock only protects find, insert, remove. Value updates are done
+    /*
+     * The lock only protects find, insert, remove. Value updates are done
      * with atomics, so we do not need to get an exclusive lock to update
      * counter values.
      */
+    perfetto::Track parent_track;
     std::shared_timed_mutex mutex;
     std::unordered_map<qemu_counter_id, std::unique_ptr<qemu_counter>,
                        tuple_hasher<qemu_counter_id>>
@@ -95,7 +98,8 @@ class qemu_counters_state
     boost::optional<int64_t> try_fetch_add(qemu_counter_id id, int64_t value);
 
   public:
-    qemu_counters_state() {}
+    qemu_counters_state() : parent_track(perfetto::Track()) {}
+    qemu_counters_state(perfetto::Track track) : parent_track(track) {}
 
     /* Set counter value or create new counter, emit the counter value */
     void set(qemu_counter_id id, int64_t value);
