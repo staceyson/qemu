@@ -342,7 +342,22 @@ void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
             int size = perfetto_log_entry_insn_size(entry);
             int nitems;
 
+            /* Due to perfetto limitations, use the opcode message for now */
+#ifdef NOTYET
             instr->set_opcode((const uint8_t *)bytes, size);
+#else
+            if (size <= sizeof(uint64_t)) {
+                uint64_t value;
+                memcpy(&value, bytes, size);
+                auto *opcode = instr->set_opcode_obj();
+                opcode->set_value(value);
+                opcode->set_size(size);
+            } else {
+                // Throw an error or something
+                assert(false && "Not reached");
+            }
+#endif
+
             instr->set_pc(perfetto_log_entry_pc(entry));
 
             nitems = perfetto_log_entry_regs(entry);
