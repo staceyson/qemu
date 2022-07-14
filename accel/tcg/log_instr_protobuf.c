@@ -266,7 +266,7 @@ void init_protobuf_backend(CPUArchState *env)
      */
 
     if (protobuf_logfile == NULL) {
-        protobuf_logfile = fopen("qemu-protobuf.pb", "w+b");
+        protobuf_logfile = fopen("qemu-trace.pb", "w+b");
     }
 }
 
@@ -390,4 +390,9 @@ void emit_protobuf_entry(CPUArchState *env, cpu_log_entry_t *entry)
         g_free(pb_entry.evt);
     }
     g_free(buf);
+}
+
+void qemu_log_instr_protobuf_conf_logfile(const char *name)
+{
+    protobuf_logfile = fopen(name, "w+b");
 }

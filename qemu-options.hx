@@ -4234,6 +4234,14 @@ SRST
     Select categories of messages to include in the trace (instructions, stats)
 ERST
 
+DEF("cheri-trace-protobuf-logfile", HAS_ARG, QEMU_OPTION_trace_protobuf_logfile, \
+"-cheri-trace-protobuf-logfile [logfile]     \
+ Set log file for protobuf traces, defaults to qemu_trace.pb.\n", QEMU_ARCH_ALL)
+SRST
+``-cheri-trace-protobuf-logfile [logfile]``
+    Set protobuf trace output file.
+ERST
+
 DEF("cheri-trace-filters", HAS_ARG, QEMU_OPTION_cheri_trace_filters, \
 "-cheri-trace-filters [event]     Select trace filters to use.\n", QEMU_ARCH_ALL)
 SRST

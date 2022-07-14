@@ -214,6 +214,10 @@ int qemu_log_instr_perfetto_conf_categories(const char *category_list);
 #endif
 #endif /* CONFIG_TRACE_PERFETTO */
 
+#ifdef CONFIG_TRACE_PROTOBUF
+void qemu_log_instr_protobuf_conf_logfile(const char *name);
+#endif /* CONFIG_TRACE_PROTOBUF  */
+
 #ifndef __cplusplus
 /* No visibility in the perfetto tracing backend */
 
