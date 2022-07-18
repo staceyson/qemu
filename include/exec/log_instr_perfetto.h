@@ -102,6 +102,7 @@ void perfetto_emit_instr(void *backend_data, cpu_log_entry_handle entry_handle);
     type perfetto_mem_info_##field(cpu_log_entry_handle handle, int idx)
 #define CAPREG_GETTER_DECL(type, field)                                        \
     type perfetto_cap_##field(cap_register_handle handle)
+#define TARGET_CAP_DECL(type, field) type perfetto_target_cap_##field()
 
 #define CPU_LOG_ENTRY_GETTER(type, field)                                      \
     CPU_LOG_ENTRY_GETTER_DECL(type, field)                                     \
@@ -155,6 +156,8 @@ CAPREG_GETTER_DECL(uint64_t, cursor);
 CAPREG_GETTER_DECL(uint64_t, length);
 CAPREG_GETTER_DECL(uint32_t, perms);
 CAPREG_GETTER_DECL(uint32_t, otype);
+
+TARGET_CAP_DECL(uint32_t, size);
 
 #ifdef __cplusplus
 }

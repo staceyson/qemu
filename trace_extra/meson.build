@@ -4,7 +4,7 @@ qemutrace_ss = ss.source_set()
 
 if config_all.has_key('CONFIG_TCG_LOG_INSTR') and config_all.has_key('CONFIG_TRACE_PERFETTO')
    qemutrace_ss.add(dependency('boost', modules: ['filesystem', 'system']))
-   qemutrace_ss.add(files('trace_perfetto.cc', 'guest_context_tracker.cc', 'trace_counters.cc',
+   qemutrace_ss.add(files('trace_perfetto.cc', 'guest_context_tracker.cc', 'trace_counters.cc', 'memory_interceptor.cc',
                           'cheri-perfetto/sdk/perfetto.cc'))
 endif
 

@@ -4234,6 +4234,21 @@ SRST
     Select categories of messages to include in the trace (instructions, stats)
 ERST
 
+DEF("cheri-trace-perfetto-interceptor-logfile", HAS_ARG, QEMU_OPTION_trace_perfetto_interceptor_logfile, \
+"-cheri-trace-perfetto-categories category[,...]     \
+ Set log file for perfetto interceptor, defaults to mem_access.trace.\n", QEMU_ARCH_ALL)
+SRST
+``-cheri-trace-perfetto-interceptor-logfile [logfile]``
+    Set perfetto interceptor trace output file.
+ERST
+
+DEF("cheri-trace-perfetto-enable-interceptor", 0, QEMU_OPTION_trace_perfetto_enable_interceptor, \
+"-cheri-trace-perfetto-enable-interceptor     Enable perfetto interceptor.\n", QEMU_ARCH_ALL)
+SRST
+``-cheri-trace-perfetto-enable-interceptor ``
+    Enable perfetto interceptor, skips normal perfetto tracing service.
+ERST
+
 DEF("cheri-trace-protobuf-logfile", HAS_ARG, QEMU_OPTION_trace_protobuf_logfile, \
 "-cheri-trace-protobuf-logfile [logfile]     \
  Set log file for protobuf traces, defaults to qemu_trace.pb.\n", QEMU_ARCH_ALL)

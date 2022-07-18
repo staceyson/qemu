@@ -53,6 +53,8 @@
 #include "trace_extra/trace_counters.hh"
 #include "trace_extra/guest_context_tracker.hh"
 
+#include "trace_extra/memory_interceptor.hh"
+
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();
 
 namespace fs = boost::filesystem;
@@ -67,11 +69,20 @@ std::unique_ptr<perfetto::TracingSession> session;
 /* perfetto logfile */
 fs::path logfile("qemu_trace.pb");
 
+/* perfetto interceptor trace file */
+string mem_logfile_name = "mem_access.trace";
+
+/* enable perfetto interceptor */
+bool enable_interceptor = false;
+
 /* category strings */
 std::vector<std::string> categories;
 
 /* Global scheduling event track */
 std::unique_ptr<perfetto::Track> sched_track;
+
+/* MO_SIZE from MemOp in /include/exec/memop.h */
+constexpr int MO_SIZE = 3;
 
 /*
  * Private per-CPU state.
@@ -100,7 +111,6 @@ struct perfetto_backend_data {
         perfetto::TrackEvent::SetTrackDescriptor(ctrl_track, desc);
     }
 };
-
 /*
  * Initialize perfetto tracing.
  *
@@ -122,13 +132,47 @@ bool perfetto_start_tracing(void)
     perfetto::Tracing::Initialize(args);
     perfetto::TrackEvent::Register();
 
+    if (enable_interceptor) {
+        DynamorioTraceInterceptor::mem_logfile.open(mem_logfile_name,
+                                                    ios::binary);
+        // drcachesim needs a header in the file, so we create it here
+        trace_entry_t header{ .type = TRACE_TYPE_HEADER,
+                              .size = 0,
+                              .addr = TRACE_ENTRY_VERSION };
+        DynamorioTraceInterceptor::mem_logfile.write((char *)&header,
+                                                     sizeof(header));
+
+        // dub thread and pid as we only have one process one thread for now
+        trace_entry_t thread{ .type = TRACE_TYPE_THREAD, .size = 4, .addr = 1 };
+        trace_entry_t pid{ .type = TRACE_TYPE_PID, .size = 4, .addr = 1 };
+
+        // dub timestamp and cpuid
+        trace_entry_t timestamp{ .type = TRACE_TYPE_MARKER,
+                                 .size = TRACE_MARKER_TYPE_TIMESTAMP,
+                                 .addr = 0 };
+        trace_entry_t cpuid{ .type = TRACE_TYPE_MARKER,
+                             .size = TRACE_MARKER_TYPE_CPU_ID,
+                             .addr = 0 };
+
+        DynamorioTraceInterceptor::mem_logfile.write((char *)&thread,
+                                                     sizeof(thread));
+        DynamorioTraceInterceptor::mem_logfile.write((char *)&pid, sizeof(pid));
+        DynamorioTraceInterceptor::mem_logfile.write((char *)&timestamp,
+                                                     sizeof(timestamp));
+        DynamorioTraceInterceptor::mem_logfile.write((char *)&cpuid,
+                                                     sizeof(cpuid));
+
+        perfetto::InterceptorDescriptor interceptor_desc;
+        interceptor_desc.set_name("console");
+        DynamorioTraceInterceptor::Register(interceptor_desc);
+    }
+
     cfg.add_buffers()->set_size_kb(1 << 19); // 512MiB
     cfg.set_flush_period_ms(2000);
     cfg.set_file_write_period_ms(1000);
     fs::remove(logfile);
     cfg.set_write_into_file(true);
     cfg.set_output_path(logfile.string());
-
     auto *ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");
     track_cfg.add_disabled_categories("*");
@@ -136,6 +180,11 @@ bool perfetto_start_tracing(void)
         track_cfg.add_enabled_categories(category);
     }
     ds_cfg->set_track_event_config_raw(track_cfg.SerializeAsString());
+    if (enable_interceptor) {
+        // redirect to interceptor
+        ds_cfg->mutable_interceptor_config()->set_name("console");
+    }
+
     auto *producer_cfg = cfg.add_producers();
     producer_cfg->set_producer_name("qemu-tcg");
     producer_cfg->set_shm_size_kb(1 << 18); // 256MiB
@@ -168,6 +217,16 @@ void perfetto_tracing_stop(void)
     // also need to call the buffer sync function for each CPU on the exit path.
     session->FlushBlocking();
     session->StopBlocking();
+    if (enable_interceptor) {
+        // add footer to tracing file
+        trace_entry_t footer;
+        footer.type = TRACE_TYPE_FOOTER;
+        footer.size = 0;
+        footer.addr = 0;
+        DynamorioTraceInterceptor::mem_logfile.write((char *)&footer,
+                                                     sizeof(footer));
+        DynamorioTraceInterceptor::mem_logfile.close();
+    }
 }
 
 void trace_cap_register(perfetto::protos::pbzero::QEMULogEntryCapability *cap,
@@ -342,7 +401,7 @@ void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
             int size = perfetto_log_entry_insn_size(entry);
             int nitems;
 
-            /* Due to perfetto limitations, use the opcode message for now */
+        /* Due to perfetto limitations, use the opcode message for now */
 #ifdef NOTYET
             instr->set_opcode((const uint8_t *)bytes, size);
 #else
@@ -379,6 +438,7 @@ void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
                 auto flags = perfetto_mem_info_flags(entry, i);
                 auto *meminfo = instr->add_mem();
                 meminfo->set_addr(perfetto_mem_info_addr(entry, i));
+
                 switch (flags) {
                 case LMI_LD:
                     meminfo->set_op(
@@ -404,8 +464,12 @@ void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
                     cap_register_handle cap_handle =
                         perfetto_reg_info_cap(entry, i);
                     trace_cap_register(capinfo, cap_handle);
+                    // set cap size
+                    meminfo->set_size(perfetto_target_cap_size());
                 } else {
                     meminfo->set_int_value(perfetto_mem_info_value(entry, i));
+                    meminfo->set_size(
+                        1 << (perfetto_mem_info_op(entry, i) & MO_SIZE));
                 }
             }
 
@@ -450,6 +514,15 @@ qemu_log_instr_perfetto_conf_categories(const char *category_str)
         categories.push_back(strspec);
 }
 
+extern "C" void qemu_log_instr_perfetto_interceptor_logfile(const char *name)
+{
+    mem_logfile_name = name;
+}
+
+extern "C" void qemu_log_instr_perfetto_enable_interceptor()
+{
+    enable_interceptor = true;
+}
 /*
  * Initialize perfetto tracing.
  *

@@ -40,7 +40,7 @@
 #include "exec/log_instr.h"
 #include "exec/log_instr_internal.h"
 #include "exec/log_instr_perfetto.h"
-
+#include "target/cheri-common/cheri_defs.h"
 /*
  * Initialize perfetto tracing.
  *
@@ -193,6 +193,15 @@ CAPREG_GETTER_DECL(uint32_t, otype)
 {
 #ifdef TARGET_CHERI
     return cap_get_otype_unsigned((cap_register_t *)handle);
+#else
+    return 0;
+#endif
+}
+
+TARGET_CAP_DECL(uint32_t, size)
+{
+#ifdef TARGET_CHERI
+    return CHERI_CAP_SIZE;
 #else
     return 0;
 #endif

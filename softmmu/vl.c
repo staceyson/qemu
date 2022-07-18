@@ -3484,8 +3484,13 @@ void qemu_init(int argc, char **argv, char **envp)
             case QEMU_OPTION_trace_perfetto_categories:
                 qemu_log_instr_perfetto_conf_categories(optarg);
                 break;
+            case QEMU_OPTION_trace_perfetto_enable_interceptor:
+                qemu_log_instr_perfetto_enable_interceptor();
+                break;
+            case QEMU_OPTION_trace_perfetto_interceptor_logfile:
+                qemu_log_instr_perfetto_interceptor_logfile(optarg);
 #endif
-#ifdef CONFIG_TRACE_PERFETTO
+#ifdef CONFIG_TRACE_PROTOBUF
             case QEMU_OPTION_trace_protobuf_logfile:
                 qemu_log_instr_protobuf_conf_logfile(optarg);
                 break;

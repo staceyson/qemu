@@ -209,6 +209,8 @@ extern "C" {
 #endif
 void qemu_log_instr_perfetto_conf_logfile(const char *name);
 int qemu_log_instr_perfetto_conf_categories(const char *category_list);
+void qemu_log_instr_perfetto_enable_interceptor(void);
+void qemu_log_instr_perfetto_interceptor_logfile(const char *name);
 #ifdef __cplusplus
 }
 #endif
