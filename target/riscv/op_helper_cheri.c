@@ -156,7 +156,11 @@ void HELPER(cspecialrw)(CPUArchState *env, uint32_t cd, uint32_t cs,
 {
     uintptr_t _host_return_address = GETPC();
     // Ensure that env->PCC.cursor is correct:
-    cpu_restore_state(env_cpu(env), _host_return_address, false);
+    /*
+     * This breaks -icount because it triggers early deallocation of the TB.
+     * It seems that it is only required for logging anyway.
+     */
+    /* cpu_restore_state(env_cpu(env), _host_return_address, false); */
 
     assert(index <= 31 && "Bug in translator?");
     enum SCRAccessMode mode = scr_info[index].access;
