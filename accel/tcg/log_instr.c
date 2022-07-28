@@ -106,32 +106,27 @@ static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry);
 static trace_backend_hooks_t trace_backends[] = {
     { .init = NULL,
       .sync = NULL,
-      .emit_header = NULL,
       .emit_instr = emit_text_instr },
-    { .init = NULL,
+    { .init = emit_cvtrace_header,
       .sync = NULL,
-      .emit_header = emit_cvtrace_header,
       .emit_instr = emit_cvtrace_entry },
     { .init = NULL,
       .sync = NULL,
-      .emit_header = NULL,
       .emit_instr = emit_nop_entry },
 #ifdef CONFIG_TRACE_PERFETTO
     { .init = init_perfetto_backend,
       .sync = sync_perfetto_backend,
-      .emit_header = NULL,
+      .emit_debug = emit_perfetto_debug,
       .emit_instr = emit_perfetto_entry },
 #endif
 #ifdef CONFIG_TRACE_PROTOBUF
     { .init = init_protobuf_backend,
       .sync = sync_protobuf_backend,
-      .emit_header = NULL,
       .emit_instr = emit_protobuf_entry },
 #endif
 #ifdef CONFIG_TRACE_JSON
     { .init = init_json_backend,
       .sync = sync_json_backend,
-      .emit_header = NULL,
       .emit_instr = emit_json_entry },
 #endif
 };
@@ -521,11 +516,6 @@ void qemu_log_instr_init(CPUState *cpu)
     /* Make sure we are using the correct trace format. */
     if (trace_backend == NULL) {
         trace_backend = &trace_backends[qemu_log_instr_backend];
-        /* Only emit header on first init */
-        if (trace_backend->emit_header) {
-            /* XXX this can probably go away and just use init() */
-            trace_backend->emit_header(cpu->env_ptr);
-        }
     }
     /* Initialize backend state on this CPU */
     if (trace_backend->init) {

@@ -151,7 +151,6 @@ typedef struct log_meminfo {
 struct trace_backend_hooks {
     void (*init)(CPUArchState *env);
     void (*sync)(CPUArchState *env);
-    void (*emit_header)(CPUArchState *env);
     void (*emit_instr)(CPUArchState *env, cpu_log_entry_t *entry);
 };
 typedef struct trace_backend_hooks trace_backend_hooks_t;

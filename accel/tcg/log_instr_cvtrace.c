@@ -82,9 +82,15 @@ typedef struct {
  */
 void emit_cvtrace_header(CPUArchState *env)
 {
-    FILE *logfile = qemu_log_lock();
+    static bool initialized;
+    FILE *logfile;
     char buffer[sizeof(cheri_trace_entry_t)];
 
+    if (initialized) {
+        return;
+    }
+    initialized = true;
+    logfile = qemu_log_lock();
     buffer[0] = CTE_QEMU_VERSION;
     g_strlcpy(buffer + 1, CTE_QEMU_MAGIC, sizeof(buffer) - 2);
     fwrite(buffer, sizeof(buffer), 1, logfile);
