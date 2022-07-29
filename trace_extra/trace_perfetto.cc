@@ -45,7 +45,8 @@
 #include <fcntl.h>
 #include <perfetto.h>
 #include <boost/filesystem.hpp>
-
+#include <boost/iostreams/filter/gzip.hpp>
+#include <fstream>
 // #include "qemu/cpu-defs.h"
 #include "qemu/log_instr.h"
 #include "exec/log_instr_internal.h"
@@ -70,7 +71,7 @@ std::unique_ptr<perfetto::TracingSession> session;
 fs::path logfile("qemu_trace.pb");
 
 /* perfetto interceptor trace file */
-string mem_logfile_name = "mem_access.trace";
+string mem_logfile_name = "mem_access.trace.gz";
 
 /* enable perfetto interceptor */
 bool enable_interceptor = false;
@@ -133,8 +134,10 @@ bool perfetto_start_tracing(void)
     perfetto::TrackEvent::Register();
 
     if (enable_interceptor) {
-        DynamorioTraceInterceptor::mem_logfile.open(mem_logfile_name,
-                                                    ios::binary);
+        DynamorioTraceInterceptor::mem_logfile.push(io::gzip_compressor());
+        DynamorioTraceInterceptor::mem_logfile.push(
+            io::file_descriptor_sink(mem_logfile_name));
+
         // drcachesim needs a header in the file, so we create it here
         trace_entry_t header{ .type = TRACE_TYPE_HEADER,
                               .size = 0,
@@ -225,7 +228,7 @@ void perfetto_tracing_stop(void)
         footer.addr = 0;
         DynamorioTraceInterceptor::mem_logfile.write((char *)&footer,
                                                      sizeof(footer));
-        DynamorioTraceInterceptor::mem_logfile.close();
+        io::close(DynamorioTraceInterceptor::mem_logfile);
     }
 }
 
