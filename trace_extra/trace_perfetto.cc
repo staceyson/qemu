@@ -171,7 +171,7 @@ bool perfetto_start_tracing(void)
     }
 
     cfg.add_buffers()->set_size_kb(1 << 19); // 512MiB
-    cfg.set_flush_period_ms(2000);
+    cfg.set_flush_period_ms(5000);
     cfg.set_file_write_period_ms(1000);
     fs::remove(logfile);
     cfg.set_write_into_file(true);
@@ -190,7 +190,7 @@ bool perfetto_start_tracing(void)
 
     auto *producer_cfg = cfg.add_producers();
     producer_cfg->set_producer_name("qemu-tcg");
-    producer_cfg->set_shm_size_kb(1 << 18); // 256MiB
+    producer_cfg->set_shm_size_kb(1 << 15); // 32MiB (the current max allowed)
 
     session = perfetto::Tracing::NewTrace();
 
