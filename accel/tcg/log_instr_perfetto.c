@@ -62,6 +62,13 @@ void sync_perfetto_backend(CPUArchState *env)
     perfetto_sync_cpu(cpulog->backend_data);
 }
 
+void emit_perfetto_debug(CPUArchState *env, QEMUDebugCounter name, long value)
+{
+    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
+
+    perfetto_emit_debug(cpulog->backend_data, name, value);
+}
+
 void emit_perfetto_entry(CPUArchState *env, cpu_log_entry_t *entry)
 {
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);

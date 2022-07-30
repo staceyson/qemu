@@ -104,15 +104,11 @@ static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry);
  * Existing format callbacks list, indexed by qemu_log_instr_backend_t.
  */
 static trace_backend_hooks_t trace_backends[] = {
-    { .init = NULL,
-      .sync = NULL,
-      .emit_instr = emit_text_instr },
+    { .init = NULL, .sync = NULL, .emit_instr = emit_text_instr },
     { .init = emit_cvtrace_header,
       .sync = NULL,
       .emit_instr = emit_cvtrace_entry },
-    { .init = NULL,
-      .sync = NULL,
-      .emit_instr = emit_nop_entry },
+    { .init = NULL, .sync = NULL, .emit_instr = emit_nop_entry },
 #ifdef CONFIG_TRACE_PERFETTO
     { .init = init_perfetto_backend,
       .sync = sync_perfetto_backend,
@@ -594,9 +590,8 @@ void qemu_log_instr_set_buffer_size(unsigned long new_size)
     CPUState *cpu;
 
     if (new_size < MIN_ENTRY_BUFFER_SIZE) {
-        warn_report(
-            "New trace entry buffer size is too small < %zu, ignored.",
-            (size_t)MIN_ENTRY_BUFFER_SIZE);
+        warn_report("New trace entry buffer size is too small < %zu, ignored.",
+                    (size_t)MIN_ENTRY_BUFFER_SIZE);
         return;
     }
 
@@ -1283,6 +1278,13 @@ void qemu_log_instr_flush(CPUArchState *env)
         curr = (curr + 1) % cpulog->instr_info->len;
     }
     cpulog->ring_tail = cpulog->ring_head;
+}
+
+void qemu_log_instr_counter(CPUState *cpu, QEMUDebugCounter name, long value)
+{
+    if (trace_backend->emit_debug) {
+        trace_backend->emit_debug(cpu->env_ptr, name, value);
+    }
 }
 
 /* Instruction logging helpers */

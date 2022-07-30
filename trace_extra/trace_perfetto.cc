@@ -282,7 +282,6 @@ bool process_state_event(perfetto_backend_data *data,
 void process_context_event(perfetto_backend_data *data,
                            cpu_log_entry_handle entry, log_event_t *evt)
 {
-    auto *state = data->ctx_tracker.get_ctx_state();
 
     /* Swap current context. */
     if (evt->ctx_update.op == LOG_EVENT_CTX_OP_SWITCH) {
@@ -554,6 +553,16 @@ extern "C" void perfetto_init_cpu(int cpu_index, void **backend_data)
 extern "C" void perfetto_sync_cpu(void *backend_data)
 {
     perfetto::TrackEvent::Flush();
+}
+
+extern "C" void perfetto_emit_debug(void *backend_data, QEMUDebugCounter index,
+                                    long value)
+{
+    auto *data = reinterpret_cast<perfetto_backend_data *>(backend_data);
+    qemu_fallback_state *cpu_state = data->ctx_tracker.get_cpu_state();
+
+    TRACE_COUNTER("qemu-debug", cpu_state->get_debug_counter_track(index),
+                  value);
 }
 
 extern "C" void perfetto_emit_instr(void *backend_data,

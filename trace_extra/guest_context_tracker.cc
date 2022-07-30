@@ -51,6 +51,14 @@ std::unordered_map<qemu_ctx_id, std::shared_ptr<qemu_context_state>,
                    tuple_hasher<qemu_ctx_id>>
     track_state_map;
 
+/*
+ * Constant mapping of QEMUDebugCounter IDs to counter track names
+ */
+const std::array<const std::string, QEMU_LOG_INSTR_DBG_MAX> debug_counter_names{
+    "tb_icount",
+    "tb_icount_tracing",
+};
+
 /* Helper to generate unique IDs for dynamic tracks */
 unsigned long gen_track_uuid()
 {

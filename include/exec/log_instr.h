@@ -350,6 +350,12 @@ void qemu_log_instr_event_dump_cap_int(log_event_t *evt, const char *reg_name,
  */
 void qemu_log_instr_extra(CPUArchState *env, const char *msg, ...);
 
+/*
+ * Tracepoint for qemu internals.
+ * This should not be used for guest events.
+ */
+void qemu_log_instr_counter(CPUState *cpu, QEMUDebugCounter name, long value);
+
 #else /* ! CONFIG_TCG_LOG_INSTR */
 #define qemu_log_instr_enabled(cpu) false
 #define qemu_log_instr_start(env, mode, pc)

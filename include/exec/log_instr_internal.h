@@ -151,6 +151,7 @@ typedef struct log_meminfo {
 struct trace_backend_hooks {
     void (*init)(CPUArchState *env);
     void (*sync)(CPUArchState *env);
+    void (*emit_debug)(CPUArchState *env, QEMUDebugCounter name, long value);
     void (*emit_instr)(CPUArchState *env, cpu_log_entry_t *entry);
 };
 typedef struct trace_backend_hooks trace_backend_hooks_t;
@@ -170,6 +171,7 @@ void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry);
 /* Perfetto backend */
 void init_perfetto_backend(CPUArchState *env);
 void sync_perfetto_backend(CPUArchState *env);
+void emit_perfetto_debug(CPUArchState *env, QEMUDebugCounter name, long value);
 void emit_perfetto_entry(CPUArchState *env, cpu_log_entry_t *entry);
 #endif
 #ifdef CONFIG_TRACE_PROTOBUF

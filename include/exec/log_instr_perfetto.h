@@ -65,7 +65,8 @@ PERFETTO_DEFINE_CATEGORIES(
     perfetto::Category("counter").SetDescription("Guest-driven counters"),
     perfetto::Category("bb_hit").SetDescription("Basic Block hit counts"),
     perfetto::Category("bb_icount").SetDescription("Basic Block instr counts"),
-    perfetto::Category("br_hit").SetDescription("Branch hit count"));
+    perfetto::Category("br_hit").SetDescription("Branch hit count"),
+    perfetto::Category("qemu-debug").SetDescription("QEMU debug counters"));
 #endif
 
 /*
@@ -87,6 +88,7 @@ typedef void *cap_register_handle;
 
 void perfetto_init_cpu(int cpu_index, void **backend_data);
 void perfetto_sync_cpu(void *backend_data);
+void perfetto_emit_debug(void *backend_data, QEMUDebugCounter name, long value);
 void perfetto_emit_instr(void *backend_data, cpu_log_entry_handle entry_handle);
 
 /*
