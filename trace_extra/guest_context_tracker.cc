@@ -145,6 +145,11 @@ qemu_ctx_id qemu_context_track::get_id() const
 
 void qemu_bb_tracker::track_next(cpu_log_entry_handle entry, uint64_t pc)
 {
+    if (!TRACE_EVENT_CATEGORY_ENABLED("bb_hit") &&
+        !TRACE_EVENT_CATEGORY_ENABLED("br_hit")) {
+        return;
+    }
+
     if (pc == 0) {
         pc = perfetto_log_entry_pc(entry);
     }
@@ -174,6 +179,11 @@ void qemu_bb_tracker::track_next(cpu_log_entry_handle entry, uint64_t pc)
 
 void qemu_bb_tracker::reset(uint64_t pc)
 {
+    if (!TRACE_EVENT_CATEGORY_ENABLED("bb_hit") &&
+        !TRACE_EVENT_CATEGORY_ENABLED("br_hit")) {
+        return;
+    }
+
     if (bb_start == 0) {
         /* Nothing to flush */
         return;
@@ -232,9 +242,13 @@ void guest_context_tracker::mode_update(
             state = it->second;
         }
     }
-    if (ctx_state && ctx_state != state) {
-        /* We are changing context */
-        ctx_state->bb_tracker->reset(perfetto_log_entry_pc(entry));
+
+    if (TRACE_EVENT_CATEGORY_ENABLED("bb_hit") ||
+        TRACE_EVENT_CATEGORY_ENABLED("br_hit")) {
+        if (ctx_state && ctx_state != state) {
+            /* We are changing context */
+            ctx_state->bb_tracker->reset(perfetto_log_entry_pc(entry));
+        }
     }
     ctx_state = state;
 }
@@ -268,9 +282,13 @@ void guest_context_tracker::context_update(cpu_log_entry_handle entry,
             state = it->second;
         }
     }
-    if (ctx_state && ctx_state != state) {
-        /* We are changing context */
-        ctx_state->bb_tracker->reset(perfetto_log_entry_pc(entry));
+
+    if (TRACE_EVENT_CATEGORY_ENABLED("bb_hit") ||
+        TRACE_EVENT_CATEGORY_ENABLED("br_hit")) {
+        if (ctx_state && ctx_state != state) {
+            /* We are changing context */
+            ctx_state->bb_tracker->reset(perfetto_log_entry_pc(entry));
+        }
     }
     ctx_state = state;
 }
@@ -278,18 +296,21 @@ void guest_context_tracker::context_update(cpu_log_entry_handle entry,
 void guest_context_tracker::flush_all_ctx_data(uint64_t pc)
 {
     /* Flush per-CPU and current context stats */
-    cpu_state.bb_tracker->reset(pc);
-    cpu_state.bb_tracker->flush();
-    if (ctx_state) {
-        ctx_state->bb_tracker->reset(pc);
-        ctx_state->bb_tracker->flush();
-    }
-    std::lock_guard<std::mutex> track_state_guard(track_state_lock);
-    for (auto id_and_state : track_state_map) {
-        qemu_bb_tracker *bb_tracker = id_and_state.second->bb_tracker.get();
-        if (bb_tracker != ctx_state->bb_tracker.get()) {
-            bb_tracker->reset(0);
-            bb_tracker->flush();
+    if (TRACE_EVENT_CATEGORY_ENABLED("bb_hit") ||
+        TRACE_EVENT_CATEGORY_ENABLED("br_hit")) {
+        cpu_state.bb_tracker->reset(pc);
+        cpu_state.bb_tracker->flush();
+        if (ctx_state) {
+            ctx_state->bb_tracker->reset(pc);
+            ctx_state->bb_tracker->flush();
+        }
+        std::lock_guard<std::mutex> track_state_guard(track_state_lock);
+        for (auto id_and_state : track_state_map) {
+            qemu_bb_tracker *bb_tracker = id_and_state.second->bb_tracker.get();
+            if (bb_tracker != ctx_state->bb_tracker.get()) {
+                bb_tracker->reset(0);
+                bb_tracker->flush();
+            }
         }
     }
 }
