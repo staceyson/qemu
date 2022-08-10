@@ -70,4 +70,4 @@
 	branch = cheri-perfetto
 [submodule "trace_extra/dynamorio"]
 	path = trace_extra/dynamorio
-	url = https://github.com/DynamoRIO/dynamorio.git
+	url = https://github.com/CTSRD-CHERI/dynamorio.git
