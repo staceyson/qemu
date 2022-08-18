@@ -331,7 +331,7 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
         prev_level_active == next_level_active) {
         goto done;
     }
-    tb_flush(cpu);
+    /* tb_flush(cpu); */
     /* Emit start/stop events */
     if (prev_level_active) {
         if (cpulog->starting) {
