@@ -179,7 +179,7 @@ static void add_poll_remove_sqe(AioContext *ctx, AioHandler *node)
 {
     struct io_uring_sqe *sqe = get_sqe(ctx);
 
-    io_uring_prep_poll_remove(sqe, node);
+    io_uring_prep_poll_remove(sqe, (uintptr_t)node);
 }
 
 /* Add a timeout that self-cancels when another cqe becomes ready */
