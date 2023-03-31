@@ -46,12 +46,12 @@
  *
  * Start tracing thread when first called.
  */
-void init_perfetto_backend(CPUArchState *env)
+void init_perfetto_backend(CPUArchState *env, const char *logfile)
 {
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
     int cpu_id = env_cpu(env)->cpu_index;
 
-    perfetto_init_cpu(cpu_id, &cpulog->backend_data);
+    perfetto_init_cpu(cpu_id, logfile, &cpulog->backend_data);
 }
 
 /* Syncronize buffers on this CPU. */
@@ -60,13 +60,6 @@ void sync_perfetto_backend(CPUArchState *env)
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
 
     perfetto_sync_cpu(cpulog->backend_data);
-}
-
-void emit_perfetto_debug(CPUArchState *env, QEMUDebugCounter name, long value)
-{
-    cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
-
-    perfetto_emit_debug(cpulog->backend_data, name, value);
 }
 
 void emit_perfetto_entry(CPUArchState *env, cpu_log_entry_t *entry)

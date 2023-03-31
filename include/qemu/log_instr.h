@@ -55,8 +55,10 @@
  */
 typedef enum {
     QEMU_LOG_INSTR_BACKEND_TEXT = 0,
-    QEMU_LOG_INSTR_BACKEND_CVTRACE = 1,
-    QEMU_LOG_INSTR_BACKEND_NOP = 2,
+    QEMU_LOG_INSTR_BACKEND_NOP = 1,
+#ifdef CONFIG_TRACE_CVTRACE
+    QEMU_LOG_INSTR_BACKEND_CVTRACE = 2,
+#endif
 #ifdef CONFIG_TRACE_PERFETTO
     QEMU_LOG_INSTR_BACKEND_PERFETTO = 3,
 #endif
@@ -214,13 +216,13 @@ typedef enum {
     /* Must be last */
     QEMU_LOG_INSTR_DBG_MAX
 } QEMUDebugCounter;
+void qemu_log_instr_conf_logfile(const char *name);
 
 #ifdef CONFIG_TRACE_PERFETTO
 /* Perfetto backend configuration hooks */
 #ifdef __cplusplus
 extern "C" {
 #endif
-void qemu_log_instr_perfetto_conf_logfile(const char *name);
 int qemu_log_instr_perfetto_conf_categories(const char *category_list);
 void qemu_log_instr_perfetto_enable_interceptor(void);
 void qemu_log_instr_perfetto_interceptor_logfile(const char *name);
@@ -228,10 +230,6 @@ void qemu_log_instr_perfetto_interceptor_logfile(const char *name);
 }
 #endif
 #endif /* CONFIG_TRACE_PERFETTO */
-
-#ifdef CONFIG_TRACE_PROTOBUF
-void qemu_log_instr_protobuf_conf_logfile(const char *name);
-#endif /* CONFIG_TRACE_PROTOBUF  */
 
 #ifndef __cplusplus
 /* No visibility in the perfetto tracing backend */

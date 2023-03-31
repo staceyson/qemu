@@ -3456,8 +3456,10 @@ void qemu_init(int argc, char **argv, char **envp)
             case QEMU_OPTION_cheri_trace_backend:
                 if (strcmp(optarg, "text") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_TEXT);
+#ifdef CONFIG_TRACE_CVTRACE
                 } else if (strcmp(optarg, "cvtrace") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_CVTRACE);
+#endif
                 } else if (strcmp(optarg, "nop") == 0) {
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_NOP);
 #ifdef CONFIG_TRACE_PERFETTO
@@ -3477,10 +3479,10 @@ void qemu_init(int argc, char **argv, char **envp)
                     exit(1);
                 }
                 break;
-#ifdef CONFIG_TRACE_PERFETTO
-            case QEMU_OPTION_trace_perfetto_logfile:
-                qemu_log_instr_perfetto_conf_logfile(optarg);
+            case QEMU_OPTION_trace_logfile:
+                qemu_log_instr_conf_logfile(optarg);
                 break;
+#ifdef CONFIG_TRACE_PERFETTO
             case QEMU_OPTION_trace_perfetto_categories:
                 qemu_log_instr_perfetto_conf_categories(optarg);
                 break;
@@ -3489,11 +3491,6 @@ void qemu_init(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_trace_perfetto_interceptor_logfile:
                 qemu_log_instr_perfetto_interceptor_logfile(optarg);
-#endif
-#ifdef CONFIG_TRACE_PROTOBUF
-            case QEMU_OPTION_trace_protobuf_logfile:
-                qemu_log_instr_protobuf_conf_logfile(optarg);
-                break;
 #endif
             case QEMU_OPTION_cheri_trace_buffer_size:
                 qemu_log_instr_set_buffer_size(strtoul(optarg, NULL, 0));

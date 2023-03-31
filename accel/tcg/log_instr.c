@@ -69,14 +69,6 @@
  * active. Each CPU holds a private logging state, that can be controlled
  * individually.
  *
- * TODO(am2419): how do we deal with orderding in case multiple registers are
- * updated? This is critical to recognize which value goes in which register,
- * and also how to tie multiple memory accesses to the respective
- * value/register. We could add an explicit target-specific register ID handle
- * in place of the register name. This could be used also to fetch the register
- * name and would provide an identifier to external parsers. Memory updates are
- * harder to deal with, at least in the current format, perhaps the semantic of
- * the instruction is enough to recover the ordering from a trace.
  */
 
 #ifdef CONFIG_TCG_LOG_INSTR
@@ -95,6 +87,8 @@ extern GArray *debug_regions;
 /* Global trace format selector. Defaults to text tracing */
 qemu_log_instr_backend_t qemu_log_instr_backend = QEMU_LOG_INSTR_BACKEND_TEXT;
 
+static const char *trace_logfile_name = "qemu_trace.txt";
+
 /* Current format callbacks. */
 static trace_backend_hooks_t *trace_backend;
 
@@ -105,9 +99,6 @@ static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry);
  */
 static trace_backend_hooks_t trace_backends[] = {
     {
-      .init = init_text_backend,
-      .sync = sync_text_backend,
-      .pre_commit = text_pre_commit_instr,
       .emit_instr = emit_text_instr
     }, {
       .emit_instr = emit_nop_entry
@@ -145,12 +136,7 @@ static cpu_log_instr_filter_fn_t trace_filters[];
 /* Trace filters to activate when a new CPU is seen */
 static GArray *reset_filters;
 
-/* Number of per-cpu ring buffer entries for ring-buffer tracing mode */
-#define MIN_ENTRY_BUFFER_SIZE (1 << 16)
-
-static unsigned long reset_entry_buffer_size = MIN_ENTRY_BUFFER_SIZE;
-
-static bool trace_debug;
+bool trace_debug;
 
 static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry)
 {
@@ -489,6 +475,16 @@ static void qemu_log_entry_destroy(gpointer data)
 }
 
 /*
+ * CLI parameters hook to configure the logfile for instruction traces.
+ * We stop reusing the qemu logfile because we don't want to RCU-lock it
+ * and we want to run our own aio context with it.
+ */
+void qemu_log_instr_conf_logfile(const char *name)
+{
+    trace_logfile_name = name;
+}
+
+/*
  * This must be called upon cpu creation.
  * Initializes the per-CPU logging state and data structures.
  *
@@ -525,9 +521,10 @@ void qemu_log_instr_init(CPUState *cpu)
     if (trace_backend == NULL) {
         trace_backend = &trace_backends[qemu_log_instr_backend];
     }
+
     /* Initialize backend state on this CPU */
     if (trace_backend->init) {
-        trace_backend->init(cpu->env_ptr);
+        trace_backend->init(cpu->env_ptr, trace_logfile_name);
     }
 
     /* If we are starting with instruction logging enabled, switch it on now */

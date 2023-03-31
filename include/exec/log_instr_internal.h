@@ -149,9 +149,9 @@ typedef struct log_meminfo {
  * binary or text format.
  */
 struct trace_backend_hooks {
-    void (*init)(CPUArchState *env);
+    void (*init)(CPUArchState *env, const char *logfile);
     void (*sync)(CPUArchState *env);
-    void (*emit_debug)(CPUArchState *env, QEMUDebugCounter name, long value);
+    void (*pre_commit)(CPUArchState *env, cpu_log_entry_t *entry);
     void (*emit_instr)(CPUArchState *env, cpu_log_entry_t *entry);
 };
 typedef struct trace_backend_hooks trace_backend_hooks_t;
@@ -162,25 +162,33 @@ typedef struct trace_backend_hooks trace_backend_hooks_t;
  */
 typedef bool (*cpu_log_instr_filter_fn_t)(struct cpu_log_entry *entry);
 
+/*
+ * Trace debug mode active. This should be constant during execution,
+ * it is only set via CLI flags before CPU execution.
+ */
+extern bool trace_debug;
+
 /* Text backend */
+void init_text_backend(CPUArchState *env, const char *logfile);
+void sync_text_backend(CPUArchState *env);
+void text_pre_commit_instr(CPUArchState *env, cpu_log_entry_t *entry);
 void emit_text_instr(CPUArchState *env, cpu_log_entry_t *entry);
 /* CVTrace backend */
 void emit_cvtrace_header(CPUArchState *env);
 void emit_cvtrace_entry(CPUArchState *env, cpu_log_entry_t *entry);
 #ifdef CONFIG_TRACE_PERFETTO
 /* Perfetto backend */
-void init_perfetto_backend(CPUArchState *env);
+void init_perfetto_backend(CPUArchState *env, const char *logfile);
 void sync_perfetto_backend(CPUArchState *env);
-void emit_perfetto_debug(CPUArchState *env, QEMUDebugCounter name, long value);
 void emit_perfetto_entry(CPUArchState *env, cpu_log_entry_t *entry);
 #endif
 #ifdef CONFIG_TRACE_PROTOBUF
-void init_protobuf_backend(CPUArchState *env);
+void init_protobuf_backend(CPUArchState *env, const char *logfile);
 void sync_protobuf_backend(CPUArchState *env);
 void emit_protobuf_entry(CPUArchState *env, cpu_log_entry_t *entry);
 #endif
 #ifdef CONFIG_TRACE_JSON
-void init_json_backend(CPUArchState *env);
+void init_json_backend(CPUArchState *env, const char *logfile);
 void sync_json_backend(CPUArchState *env);
 void emit_json_entry(CPUArchState *env, cpu_log_entry_t *entry);
 #endif
@@ -199,8 +207,17 @@ static inline cpu_log_instr_state_t *get_cpu_log_state(CPUArchState *env)
     return &env_cpu(env)->log_state;
 }
 
+/* Minmum number of per-cpu ring buffer entries */
+#define MIN_ENTRY_BUFFER_SIZE (1 << 16)
+#define DEFAULT_ENTRY_BUFFER_SIZE MIN_ENTRY_BUFFER_SIZE
+
 /*
- * Fetch the given cpu current instruction info
+/*
+ * Fetch the log entry we are currently populating.
+ *
+ * This should only be called on the CPU thread, where instructions are
+ * recorded. The access to ring_head is not synchronized as it is only possible
+ * to have concurrent reads while populating the entry.
  */
 static inline cpu_log_entry_t *get_cpu_log_entry(CPUArchState *env)
 {

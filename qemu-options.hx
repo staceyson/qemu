@@ -4219,12 +4219,12 @@ SRST
     Set CHERI trace backend to <type> (text, cvtrace or perfetto)
 ERST
 
-DEF("cheri-trace-perfetto-logfile", HAS_ARG, QEMU_OPTION_trace_perfetto_logfile, \
-"-cheri-trace-perfetto-logfile [logfile]     \
- Set log file for perfetto traces, defaults to qemu_trace.pb.\n", QEMU_ARCH_ALL)
+DEF("cheri-trace-logfile", HAS_ARG, QEMU_OPTION_trace_logfile, \
+"-cheri-trace-logfile [logfile]     \
+ Set log file for TCG instruction traces, defaults to qemu_trace.txt.\n", QEMU_ARCH_ALL)
 SRST
-``-cheri-trace-perfetto-logfile [logfile]``
-    Set perfetto trace output file.
+``-cheri-trace-logfile [logfile]``
+    Set trace output file.
 ERST
 
 DEF("cheri-trace-perfetto-categories", HAS_ARG, QEMU_OPTION_trace_perfetto_categories, \

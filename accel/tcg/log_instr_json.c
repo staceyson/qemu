@@ -173,7 +173,7 @@ void sync_json_backend(CPUArchState *env)
     qemu_log("{}]");
 }
 
-void init_json_backend(CPUArchState *env)
+void init_json_backend(CPUArchState *env, const char *logfile)
 {
     /* Initialize the json logfile */
     static bool initialized;

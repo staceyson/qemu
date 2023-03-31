@@ -497,11 +497,6 @@ void process_instr(perfetto_backend_data *data, cpu_log_entry_handle entry)
 
 } // namespace
 
-extern "C" void qemu_log_instr_perfetto_conf_logfile(const char *name)
-{
-    logfile = name;
-}
-
 extern "C" void
 qemu_log_instr_perfetto_conf_categories(const char *category_str)
 {
@@ -530,11 +525,13 @@ extern "C" void qemu_log_instr_perfetto_enable_interceptor()
  *
  * Start tracing thread when first called.
  */
-extern "C" void perfetto_init_cpu(int cpu_index, void **backend_data)
+extern "C" void perfetto_init_cpu(int cpu_index, const char *logfile_path,
+                                  void **backend_data)
 {
     static std::once_flag init_flag;
 
     std::call_once(init_flag, [&]() {
+        logfile = logfile_path;
         atexit(perfetto_tracing_stop);
         perfetto_start_tracing();
     });

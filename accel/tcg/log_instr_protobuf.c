@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2021 Alfredo Mazzinghi
+ * Copyright (c) 2021, 2023 Alfredo Mazzinghi
  *
  * This software was developed by SRI International and the University of
  * Cambridge Computer Laboratory (Department of Computer Science and
@@ -257,10 +257,6 @@ static void release_protobuf_event(QEMULogEntryEvt *pb_evt)
 void init_protobuf_backend(CPUArchState *env, const char *trace_logfile)
 {
     /*
-     * TODO should handle a separate log file to avoid pollution of the main log
-     * file with binary data from protobufs. Since this seems to be a common
-     * pattern, maybe generalize it.
-     *
      * XXX we may want to store a cache of protobuf structures in the backend
      * data so that we avoid all the g_malloc() and g_free().
      */
@@ -390,9 +386,4 @@ void emit_protobuf_entry(CPUArchState *env, cpu_log_entry_t *entry)
         g_free(pb_entry.evt);
     }
     g_free(buf);
-}
-
-void qemu_log_instr_protobuf_conf_logfile(const char *name)
-{
-    protobuf_logfile = fopen(name, "w+b");
 }
