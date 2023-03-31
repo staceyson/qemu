@@ -112,7 +112,6 @@ static trace_backend_hooks_t trace_backends[] = {
 #ifdef CONFIG_TRACE_PERFETTO
       .init = init_perfetto_backend,
       .sync = sync_perfetto_backend,
-      .emit_debug = emit_perfetto_debug,
       .emit_instr = emit_perfetto_entry
 #endif
     }, {
@@ -1290,13 +1289,6 @@ void qemu_log_instr_flush(CPUArchState *env)
         curr = (curr + 1) % cpulog->entry_buffer->len;
     }
     cpulog->ring_tail = cpulog->ring_head;
-}
-
-void qemu_log_instr_counter(CPUState *cpu, QEMUDebugCounter name, long value)
-{
-    if (trace_backend->emit_debug) {
-        trace_backend->emit_debug(cpu->env_ptr, name, value);
-    }
 }
 
 /* Instruction logging helpers */

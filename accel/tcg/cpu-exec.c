@@ -700,24 +700,6 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
     /* Instruction counter expired.  */
     assert(icount_enabled());
 #ifndef CONFIG_USER_ONLY
-#if defined(CONFIG_TCG_LOG_INSTR) && defined(CONFIG_TRACE_PERFETTO)
-    {
-        int64_t executed = cpu->icount_budget -
-            (cpu_neg(cpu)->icount_decr.u16.low + cpu->icount_extra);
-        /*
-         * Assume that it is not possible to exit a tb chain with
-         * where tracing occurred but the first or last tb don't have
-         * the tracing flag set.
-         */
-        if (tb->cflags & CF_LOG_INSTR) {
-            qemu_log_instr_counter(cpu, QEMU_LOG_INSTR_DBG_INSN_TRACING_ICOUNT,
-                                   executed);
-        } else {
-            qemu_log_instr_counter(cpu, QEMU_LOG_INSTR_DBG_INSN_ICOUNT,
-                                   executed);
-        }
-    }
-#endif
     /* Ensure global icount has gone forward */
     icount_update(cpu);
 

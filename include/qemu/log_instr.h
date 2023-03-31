@@ -205,18 +205,6 @@ typedef struct {
     };
 } log_event_t;
 
-/*
- * Internal QEMU debug counters.
- * These are always traced, regardless of whether tracing is enabled or not.
- * This enumeration defines the name of the debug counters for the backends
- * to use.
- */
-typedef enum {
-    QEMU_LOG_INSTR_DBG_INSN_ICOUNT = 0,
-    QEMU_LOG_INSTR_DBG_INSN_TRACING_ICOUNT = 1,
-    /* Must be last */
-    QEMU_LOG_INSTR_DBG_MAX
-} QEMUDebugCounter;
 void qemu_log_instr_conf_logfile(const char *name);
 
 #ifdef CONFIG_TRACE_PERFETTO

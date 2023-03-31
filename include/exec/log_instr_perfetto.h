@@ -88,7 +88,6 @@ typedef void *cap_register_handle;
 
 void perfetto_init_cpu(int cpu_index, const char *logfile, void **backend_data);
 void perfetto_sync_cpu(void *backend_data);
-void perfetto_emit_debug(void *backend_data, QEMUDebugCounter name, long value);
 void perfetto_emit_instr(void *backend_data, cpu_log_entry_handle entry_handle);
 
 /*

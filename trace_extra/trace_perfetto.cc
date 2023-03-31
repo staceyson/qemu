@@ -552,16 +552,6 @@ extern "C" void perfetto_sync_cpu(void *backend_data)
     perfetto::TrackEvent::Flush();
 }
 
-extern "C" void perfetto_emit_debug(void *backend_data, QEMUDebugCounter index,
-                                    long value)
-{
-    auto *data = reinterpret_cast<perfetto_backend_data *>(backend_data);
-    qemu_fallback_state *cpu_state = data->ctx_tracker.get_cpu_state();
-
-    TRACE_COUNTER("qemu-debug", cpu_state->get_debug_counter_track(index),
-                  value);
-}
-
 extern "C" void perfetto_emit_instr(void *backend_data,
                                     cpu_log_entry_handle entry)
 {
