@@ -104,27 +104,39 @@ static void emit_nop_entry(CPUArchState *env, cpu_log_entry_t *entry);
  * Existing format callbacks list, indexed by qemu_log_instr_backend_t.
  */
 static trace_backend_hooks_t trace_backends[] = {
-    { .init = NULL, .sync = NULL, .emit_instr = emit_text_instr },
-    { .init = emit_cvtrace_header,
+    {
+      .init = init_text_backend,
+      .sync = sync_text_backend,
+      .pre_commit = text_pre_commit_instr,
+      .emit_instr = emit_text_instr
+    }, {
+      .emit_instr = emit_nop_entry
+    }, {
+#ifdef CONFIG_TRACE_CVTRACE
+      .init = emit_cvtrace_header,
       .sync = NULL,
-      .emit_instr = emit_cvtrace_entry },
-    { .init = NULL, .sync = NULL, .emit_instr = emit_nop_entry },
+      .emit_instr = emit_cvtrace_entry
+#endif
+    }, {
 #ifdef CONFIG_TRACE_PERFETTO
-    { .init = init_perfetto_backend,
+      .init = init_perfetto_backend,
       .sync = sync_perfetto_backend,
       .emit_debug = emit_perfetto_debug,
-      .emit_instr = emit_perfetto_entry },
+      .emit_instr = emit_perfetto_entry
 #endif
+    }, {
 #ifdef CONFIG_TRACE_PROTOBUF
-    { .init = init_protobuf_backend,
+      .init = init_protobuf_backend,
       .sync = sync_protobuf_backend,
-      .emit_instr = emit_protobuf_entry },
+      .emit_instr = emit_protobuf_entry
 #endif
+    }, {
 #ifdef CONFIG_TRACE_JSON
-    { .init = init_json_backend,
+      .init = init_json_backend,
       .sync = sync_json_backend,
-      .emit_instr = emit_json_entry },
+      .emit_instr = emit_json_entry
 #endif
+    },
 };
 
 /* Existing trace filters list, indexed by cpu_log_instr_filter_t */
