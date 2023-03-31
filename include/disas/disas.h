@@ -18,8 +18,11 @@ void monitor_disas(Monitor *mon, CPUState *cpu,
 
 char *plugin_disas(CPUState *cpu, uint64_t addr, size_t size);
 
-char *disas_one_strbuf(CPUState *cpu, void *code, unsigned long size,
-                       target_ulong vma);
+char *disas_one_str(CPUState *cpu, void *code, unsigned long size,
+                    target_ulong vma);
+
+void disas_one_strbuf(CPUState *cpu, void *code, unsigned long size,
+                      target_ulong vma, char *buf, int bufsize);
 
 /* Look up symbol for debugging purpose.  Returns "" if unknown. */
 const char *lookup_symbol(target_ulong orig_addr);
