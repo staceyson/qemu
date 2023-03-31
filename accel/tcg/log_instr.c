@@ -89,6 +89,14 @@ qemu_log_instr_backend_t qemu_log_instr_backend = QEMU_LOG_INSTR_BACKEND_TEXT;
 
 static const char *trace_logfile_name = "qemu_trace.txt";
 
+/*
+ * The number of entries in the trace buffer at startup.
+ *
+ * This is set by hooks in the command line argument parsing before
+ * CPUs are initialized.
+ */
+static unsigned long reset_entry_buffer_size = DEFAULT_ENTRY_BUFFER_SIZE;
+
 /* Current format callbacks. */
 static trace_backend_hooks_t *trace_backend;
 
