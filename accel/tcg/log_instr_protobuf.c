@@ -254,7 +254,7 @@ static void release_protobuf_event(QEMULogEntryEvt *pb_evt)
     g_free(pb_evt);
 }
 
-void init_protobuf_backend(CPUArchState *env)
+void init_protobuf_backend(CPUArchState *env, const char *trace_logfile)
 {
     /*
      * TODO should handle a separate log file to avoid pollution of the main log
@@ -266,7 +266,7 @@ void init_protobuf_backend(CPUArchState *env)
      */
 
     if (protobuf_logfile == NULL) {
-        protobuf_logfile = fopen("qemu-trace.pb", "w+b");
+        protobuf_logfile = fopen(trace_logfile, "w+b");
     }
 }
 
@@ -293,8 +293,8 @@ void emit_protobuf_entry(CPUArchState *env, cpu_log_entry_t *entry)
 
     if (entry->flags & LI_FLAG_HAS_INSTR_DATA) {
         pb_entry.insn_case = ENUM_ENTRY_INSN_CASE(DISAS);
-        pb_entry.disas = disas_one_strbuf(env_cpu(env), entry->insn_bytes,
-                                          sizeof(entry->insn_bytes), entry->pc);
+        pb_entry.disas = disas_one_str(env_cpu(env), entry->insn_bytes,
+                                       sizeof(entry->insn_bytes), entry->pc);
         pb_entry.cpu = env_cpu(env)->cpu_index;
         pb_entry.asid = entry->asid;
         if (entry->flags & LI_FLAG_MODE_SWITCH) {
