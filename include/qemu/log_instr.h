@@ -131,6 +131,7 @@ typedef enum {
 
 typedef struct {
     log_event_trace_state_t next_state;
+    qemu_log_instr_loglevel_t level;
     uint64_t pc;
 } log_event_trace_state_update_t;
 

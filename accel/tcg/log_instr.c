@@ -177,12 +177,13 @@ static void emit_regdump_event(CPUArchState *env, cpu_log_entry_t *entry)
     g_array_append_val(entry->events, event);
 }
 
-static inline void emit_start_event(cpu_log_entry_t *entry, target_ulong pc)
+static inline void emit_start_event(cpu_log_instr_state_t *cpulog, cpu_log_entry_t *entry, target_ulong pc)
 {
     log_event_t event;
 
     event.id = LOG_EVENT_STATE;
     event.state.next_state = LOG_EVENT_STATE_START;
+    event.state.level = cpulog->loglevel;
     event.state.pc = pc;
     /* Start events always have incomplete instruction data */
     entry->flags &= ~LI_FLAG_HAS_INSTR_DATA;
@@ -197,12 +198,13 @@ static inline void emit_start_event(cpu_log_entry_t *entry, target_ulong pc)
     g_array_append_val(entry->events, event);
 }
 
-static inline void emit_stop_event(cpu_log_entry_t *entry, target_ulong pc)
+static inline void emit_stop_event(cpu_log_instr_state_t *cpulog, cpu_log_entry_t *entry, target_ulong pc)
 {
     log_event_t event;
 
     event.id = LOG_EVENT_STATE;
     event.state.next_state = LOG_EVENT_STATE_STOP;
+    event.state.level = cpulog->loglevel;
     event.state.pc = pc;
 
     g_array_append_val(entry->events, event);
@@ -336,7 +338,7 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
             reset_log_buffer(cpulog, entry);
             goto done;
         }
-        emit_stop_event(entry, pc);
+        emit_stop_event(cpulog, entry, pc);
         QEMU_LOG_INSTR_INC_STAT(cpulog, trace_stop);
         do_instr_commit(env);
         /* Instruction commit may have advanced to the next entry buffer slot */
@@ -349,7 +351,7 @@ static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
          * Note: the start event is emitted by the first instruction being
          * traced
          */
-        emit_start_event(entry, pc);
+        emit_start_event(cpulog, entry, pc);
         emit_regdump_event(env, entry);
         QEMU_LOG_INSTR_INC_STAT(cpulog, trace_start);
     }
@@ -1266,6 +1268,7 @@ void qemu_log_instr_flush(CPUArchState *env)
     /* Emit FLUSH event so that it can be picked up by backends */
     event.id = LOG_EVENT_STATE;
     event.state.next_state = LOG_EVENT_STATE_FLUSH;
+    event.state.level = cpulog->loglevel;
     event.state.pc = entry->pc;
     qemu_log_instr_event(env, &event);
 
