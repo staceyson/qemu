@@ -161,7 +161,7 @@ static void dump_debug_stats(CPUState *cpu)
     }
 }
 
-void qemu_log_instr_enable_trace_debug()
+void qemu_log_instr_enable_trace_debug(void)
 {
     trace_debug = true;
 }
@@ -563,7 +563,7 @@ static void do_log_backend_sync(CPUState *cpu, run_on_cpu_data _unused)
  * Attempt to syncronize buffers in the tracing backend for each CPU.
  * NOTE: This is a blocking operation that may delay the exit path.
  */
-void qemu_log_instr_sync_buffers()
+void qemu_log_instr_sync_buffers(void)
 {
     CPUState *cpu;
 
