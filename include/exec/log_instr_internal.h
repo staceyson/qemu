@@ -223,7 +223,8 @@ static inline cpu_log_entry_t *get_cpu_log_entry(CPUArchState *env)
 {
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
 
-    return &g_array_index(cpulog->instr_info, cpu_log_entry_t,
+    return &g_array_index(cpulog->entry_buffer, cpu_log_entry_t,
                           cpulog->ring_head);
 }
+
 #endif /* __cplusplus */

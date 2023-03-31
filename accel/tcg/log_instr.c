@@ -263,10 +263,10 @@ static void do_instr_commit(CPUArchState *env)
     }
 
     if (cpulog->flags & QEMU_LOG_INSTR_FLAG_BUFFERED) {
-        cpulog->ring_head = (cpulog->ring_head + 1) % cpulog->instr_info->len;
+        cpulog->ring_head = (cpulog->ring_head + 1) % cpulog->entry_buffer->len;
         if (cpulog->ring_tail == cpulog->ring_head)
             cpulog->ring_tail =
-                (cpulog->ring_tail + 1) % cpulog->instr_info->len;
+                (cpulog->ring_tail + 1) % cpulog->entry_buffer->len;
     } else {
         trace_backend->emit_instr(env, entry);
         QEMU_LOG_INSTR_INC_STAT(cpulog, entries_emitted);
@@ -514,7 +514,7 @@ void qemu_log_instr_init(CPUState *cpu)
     cpulog->loglevel_active = false;
     cpulog->filters = g_array_sized_new(
         false, true, sizeof(cpu_log_instr_filter_fn_t), LOG_INSTR_FILTER_MAX);
-    cpulog->instr_info = entry_ring;
+    cpulog->entry_buffer = entry_ring;
     cpulog->ring_head = 0;
     cpulog->ring_tail = 0;
     reset_log_buffer(cpulog, entry);
@@ -582,15 +582,15 @@ static void do_log_buffer_resize(CPUState *cpu, run_on_cpu_data data)
     cpu_log_entry_t *entry;
     int i;
 
-    g_array_set_size(cpulog->instr_info, new_size);
+    g_array_set_size(cpulog->entry_buffer, new_size);
     cpulog->ring_head = 0;
     cpulog->ring_tail = 0;
-    for (i = 0; i < cpulog->instr_info->len; i++) {
+    for (i = 0; i < cpulog->entry_buffer->len; i++) {
         /*
          * Clear and reinitialize all the entries,
          * a bit overkill but should not be a frequent operation.
          */
-        entry = &g_array_index(cpulog->instr_info, cpu_log_entry_t, i);
+        entry = &g_array_index(cpulog->entry_buffer, cpu_log_entry_t, i);
         qemu_log_entry_init(entry);
         reset_log_buffer(cpulog, entry);
     }
@@ -1284,10 +1284,10 @@ void qemu_log_instr_flush(CPUArchState *env)
     }
 
     while (curr != cpulog->ring_head) {
-        entry = &g_array_index(cpulog->instr_info, cpu_log_entry_t, curr);
+        entry = &g_array_index(cpulog->entry_buffer, cpu_log_entry_t, curr);
         trace_backend->emit_instr(env, entry);
         QEMU_LOG_INSTR_INC_STAT(cpulog, entries_emitted);
-        curr = (curr + 1) % cpulog->instr_info->len;
+        curr = (curr + 1) % cpulog->entry_buffer->len;
     }
     cpulog->ring_tail = cpulog->ring_head;
 }

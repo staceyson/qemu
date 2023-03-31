@@ -245,8 +245,6 @@ static inline qemu_log_instr_backend_t qemu_log_instr_get_backend(void)
     return qemu_log_instr_backend;
 }
 
-struct cpu_log_instr_info;
-
 typedef union {
     char charv;
     short shortv;
@@ -312,6 +310,8 @@ typedef struct {
     void *backend_data;
     /* Statistics for debugging */
     qemu_log_instr_stats_t stats;
+    /* Ring buffer of cpu_log_entry */
+    GArray *entry_buffer;
 } cpu_log_instr_state_t;
 
 /*
