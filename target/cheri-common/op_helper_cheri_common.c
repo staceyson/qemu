@@ -1607,8 +1607,18 @@ target_ulong CHERI_HELPER_IMPL(cloadtags(CPUArchState *env, uint32_t cb))
         cbp, sizealign, raise_unaligned_load_exception);
 
     target_ulong result = cheri_tag_get_many(env, addr, cb, NULL, GETPC());
+    /*
+     * Check that we can access the first and last capability-size chunk.
+     * This also ensures that the bad access address is updated correctly
+     * in case any of these addresses are not accessible.
+     * In theory we should try to access the entire memory region (to match what
+     * sail does), but first and last will be equivalent for trapping.
+     */
+    (void)cpu_ld_cap_word_ra(env, addr, _host_return_address);
+    (void)cpu_ld_cap_word_ra(env, addr + sizealign - CHERI_CAP_SIZE,
+                             _host_return_address);
 #if defined(TARGET_RISCV) && defined(CONFIG_RVFI_DII)
-    /* For RVFI tracing, sail reports the valu of th last capability read. */
+    /* For RVFI tracing, sail reports the value of the last capability read. */
     target_ulong unused1, unused2;
     (void)load_cap_from_memory_raw(env, &unused1, &unused2, cb, cbp,
                                    addr + sizealign - CHERI_CAP_SIZE,
