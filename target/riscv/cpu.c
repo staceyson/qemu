@@ -756,16 +756,19 @@ static void riscv_cpu_reset(DeviceState *dev)
     null_capability(&env->utdc);
     null_capability(&env->uscratchc);
     set_max_perms_capability(&env->uepcc, 0);
+    null_capability(&env->utidc);
     // Supervisor mode trap handling
     set_max_perms_capability(&env->stcc, 0);
     null_capability(&env->stdc);
     null_capability(&env->sscratchc);
     set_max_perms_capability(&env->sepcc, 0);
+    null_capability(&env->stidc);
     // Machine mode trap handling
     set_max_perms_capability(&env->mtcc, 0);
     null_capability(&env->mtdc);
     null_capability(&env->mscratchc);
     set_max_perms_capability(&env->mepcc, 0);
+    null_capability(&env->mtidc);
 #endif /* TARGET_CHERI */
 #ifdef CONFIG_DEBUG_TCG
     env->_pc_is_current = true;

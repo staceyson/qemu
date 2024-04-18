@@ -201,6 +201,7 @@ struct CPURISCVState {
 
 #ifdef TARGET_CHERI
     // XXX: not implemented properly
+    cap_register_t utidc; // SCR 3 User thread identifier cap. (UTIDC)
     cap_register_t utcc; // SCR 4 User trap code cap. (UTCC)
     cap_register_t utdc; // SCR 5 User trap data cap. (UTDC)
     cap_register_t uscratchc; // SCR 6 User scratch cap. (UScratchC)
@@ -208,6 +209,7 @@ struct CPURISCVState {
 #endif
 
 #ifdef TARGET_CHERI
+    cap_register_t stidc;     // SCR 11 Supervisor thread identifier cap. (STIDC)
     cap_register_t stcc;      // SCR 12 Supervisor trap code cap. (STCC)
     cap_register_t stdc;      // SCR 13 Supervisor trap data cap. (STDC)
     cap_register_t sscratchc; // SCR 14 Supervisor scratch cap. (SScratchC)
@@ -219,6 +221,7 @@ struct CPURISCVState {
     target_ulong scause;
 
 #ifdef TARGET_CHERI
+    cap_register_t mtidc;     // SCR 27 Machine thread identifier cap. (MTIDC)
     cap_register_t mtcc;      // SCR 28 Machine trap code cap. (MTCC)
     cap_register_t mtdc;      // SCR 29 Machine trap data cap. (MTDC)
     cap_register_t mscratchc; // SCR 30 Machine scratch cap. (MScratchC)
@@ -834,16 +837,19 @@ static inline cap_register_t *riscv_get_scr(CPUArchState *env, uint32_t index)
     case CheriSCR_UTDC: return &env->utdc;
     case CheriSCR_UScratchC: return &env->uscratchc;
     case CheriSCR_UEPCC: return &env->uepcc;
+    case CheriSCR_UTIDC: return &env->utidc;
 
     case CheriSCR_STCC: return &env->stcc;
     case CheriSCR_STDC: return &env->stdc;
     case CheriSCR_SScratchC: return &env->sscratchc;
     case CheriSCR_SEPCC: return &env->sepcc;
+    case CheriSCR_STIDC: return &env->stidc;
 
     case CheriSCR_MTCC: return &env->mtcc;
     case CheriSCR_MTDC: return &env->mtdc;
     case CheriSCR_MScratchC: return &env->mscratchc;
     case CheriSCR_MEPCC: return &env->mepcc;
+    case CheriSCR_MTIDC: return &env->mtidc;
 
     case CheriSCR_BSTCC: return &env->vstcc;
     case CheriSCR_BSTDC: return &env->vstdc;
