@@ -84,11 +84,13 @@ enum CheriSCR {
     CheriSCR_UTDC = 5,
     CheriSCR_UScratchC = 6,
     CheriSCR_UEPCC = 7,
+    CheriSCR_UTIDC = 8,
 
     CheriSCR_STCC = 12,
     CheriSCR_STDC = 13,
     CheriSCR_SScratchC = 14,
     CheriSCR_SEPCC = 15,
+    CheriSCR_STIDC = 16,
 
     CheriSCR_MTCC = 28,
     CheriSCR_MTDC = 29,

@@ -89,6 +89,7 @@ struct SCRInfo {
                             .access = U_ASR,
                             .name = "UScratchC"},
     [CheriSCR_UEPCC] = {.r = true, .w = true, .access = U_ASR, .name = "UEPCC"},
+    [CheriSCR_UTIDC] = {.r = true, .w = false, .access = U_Always, .name = "UTIDC"},
 
     [CheriSCR_STCC] = {.r = true, .w = true, .access = S_ASR, .name = "STCC"},
     [CheriSCR_STDC] = {.r = true, .w = true, .access = S_ASR, .name = "STDC"},
@@ -97,6 +98,7 @@ struct SCRInfo {
                             .access = S_ASR,
                             .name = "SScratchC"},
     [CheriSCR_SEPCC] = {.r = true, .w = true, .access = S_ASR, .name = "SEPCC"},
+    [CheriSCR_STIDC] = {.r = true, .w = true, .access = S_ASR, .name = "STIDC"},
 
     [CheriSCR_MTCC] = {.r = true, .w = true, .access = M_ASR, .name = "MTCC"},
     [CheriSCR_MTDC] = {.r = true, .w = true, .access = M_ASR, .name = "MTDC"},
@@ -123,11 +125,13 @@ static inline cap_register_t *get_scr(CPUArchState *env, uint32_t index)
     case CheriSCR_UTDC: return &env->UTDC;
     case CheriSCR_UScratchC: return &env->UScratchC;
     case CheriSCR_UEPCC: return &env->UEPCC;
+    case CheriSCR_UTIDC: return &env->UTIDC;
 
     case CheriSCR_STCC: return &env->STCC;
     case CheriSCR_STDC: return &env->STDC;
     case CheriSCR_SScratchC: return &env->SScratchC;
     case CheriSCR_SEPCC: return &env->SEPCC;
+    case CheriSCR_STIDC: return &env->STIDC;
 
     case CheriSCR_MTCC: return &env->MTCC;
     case CheriSCR_MTDC: return &env->MTDC;
