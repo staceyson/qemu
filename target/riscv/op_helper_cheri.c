@@ -181,7 +181,7 @@ void HELPER(cspecialrw)(CPUArchState *env, uint32_t cd, uint32_t cs,
                               _host_return_address);
     }
     bool can_access_sysregs = cheri_have_access_sysregs(env);
-    bool is_write = (cd != 0);
+    bool is_write = (cs != 0);
     if (is_write && scr_needs_asr_w(mode) && !can_access_sysregs) {
         raise_cheri_exception(env, CapEx_AccessSystemRegsViolation, 32 + index);
     }
