@@ -220,6 +220,7 @@ struct CPURISCVState {
     target_ulong scause;
 
 #ifdef TARGET_CHERI
+    cap_register_t MTIDC;     // SCR 27 Machine thread identifier cap. (MTIDC)
     cap_register_t MTCC;      // SCR 28 Machine trap code cap. (MTCC)
     cap_register_t MTDC;      // SCR 29 Machine trap data cap. (MTDC)
     cap_register_t MScratchC; // SCR 30 Machine scratch cap. (MScratchC)

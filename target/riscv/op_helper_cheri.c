@@ -50,23 +50,33 @@
 enum SCRAccessMode {
     SCR_Invalid = 0,
     ASR_Flag = 1,
-    U_Always = (PRV_U + 1) << 1,
-    U_ASR = U_Always | ASR_Flag,
-    S_Always = (PRV_S + 1) << 1,
-    S_ASR = S_Always | ASR_Flag,
-    H_Always = (PRV_H + 1) << 1,
-    H_ASR = H_Always | ASR_Flag,
-    M_Always = (PRV_M + 1) << 1,
-    M_ASR = M_Always | ASR_Flag,
+    ASR_W_Flag = 2,
+    U_Always = (PRV_U + 1) << 2,
+    U_ASR_W = U_Always | ASR_W_Flag,
+    U_ASR = U_ASR_W | ASR_Flag,
+    S_Always = (PRV_S + 1) << 2,
+    S_ASR_W = S_Always | ASR_W_Flag,
+    S_ASR = S_ASR_W | ASR_Flag,
+    H_Always = (PRV_H + 1) << 2,
+    H_ASR_W = H_Always | ASR_W_Flag,
+    H_ASR = H_ASR_W | ASR_Flag,
+    M_Always = (PRV_M + 1) << 2,
+    M_ASR_W = M_Always | ASR_W_Flag,
+    M_ASR = M_ASR_W | ASR_Flag,
 };
 
 static inline int scr_min_priv(enum SCRAccessMode mode)
 {
-    return ((int)mode >> 1) - 1;
+    return ((int)mode >> 2) - 1;
 }
 static inline int scr_needs_asr(enum SCRAccessMode mode)
 {
     return (mode & ASR_Flag) == ASR_Flag;
+}
+
+static inline int scr_needs_asr_w(enum SCRAccessMode mode)
+{
+    return (mode & ASR_W_Flag) == ASR_W_Flag;
 }
 
 struct SCRInfo {
@@ -89,7 +99,7 @@ struct SCRInfo {
                             .access = U_ASR,
                             .name = "UScratchC"},
     [CheriSCR_UEPCC] = {.r = true, .w = true, .access = U_ASR, .name = "UEPCC"},
-    [CheriSCR_UTIDC] = {.r = true, .w = false, .access = U_Always, .name = "UTIDC"},
+    [CheriSCR_UTIDC] = {.r = true, .w = true, .access = U_ASR_W, .name = "UTIDC"},
 
     [CheriSCR_STCC] = {.r = true, .w = true, .access = S_ASR, .name = "STCC"},
     [CheriSCR_STDC] = {.r = true, .w = true, .access = S_ASR, .name = "STDC"},
@@ -98,7 +108,7 @@ struct SCRInfo {
                             .access = S_ASR,
                             .name = "SScratchC"},
     [CheriSCR_SEPCC] = {.r = true, .w = true, .access = S_ASR, .name = "SEPCC"},
-    [CheriSCR_STIDC] = {.r = true, .w = true, .access = S_ASR, .name = "STIDC"},
+    [CheriSCR_STIDC] = {.r = true, .w = true, .access = S_ASR_W, .name = "STIDC"},
 
     [CheriSCR_MTCC] = {.r = true, .w = true, .access = M_ASR, .name = "MTCC"},
     [CheriSCR_MTDC] = {.r = true, .w = true, .access = M_ASR, .name = "MTDC"},
@@ -107,6 +117,7 @@ struct SCRInfo {
                             .access = M_ASR,
                             .name = "MScratchC"},
     [CheriSCR_MEPCC] = {.r = true, .w = true, .access = M_ASR, .name = "MEPCC"},
+    [CheriSCR_MTIDC] = {.r = true, .w = true, .access = M_ASR_W, .name = "MTIDC"},
 
     [CheriSCR_BSTCC] = {.r = true, .w = true, .access = H_ASR, .name= "BSTCC"},
     [CheriSCR_BSTDC] = {.r = true, .w = true, .access = H_ASR, .name= "BSTCC"},
@@ -137,6 +148,7 @@ static inline cap_register_t *get_scr(CPUArchState *env, uint32_t index)
     case CheriSCR_MTDC: return &env->MTDC;
     case CheriSCR_MScratchC: return &env->MScratchC;
     case CheriSCR_MEPCC: return &env->MEPCC;
+    case CheriSCR_MTIDC: return &env->MTIDC;
 
     case CheriSCR_BSTCC: return &env->VSTCC;
     case CheriSCR_BSTDC: return &env->VSTDC;
@@ -169,6 +181,10 @@ void HELPER(cspecialrw)(CPUArchState *env, uint32_t cd, uint32_t cs,
                               _host_return_address);
     }
     bool can_access_sysregs = cheri_have_access_sysregs(env);
+    bool is_write = (cd != 0);
+    if (is_write && scr_needs_asr_w(mode) && !can_access_sysregs) {
+        raise_cheri_exception(env, CapEx_AccessSystemRegsViolation, 32 + index);
+    }
     if (scr_needs_asr(mode) && !can_access_sysregs) {
         raise_cheri_exception(env, CapEx_AccessSystemRegsViolation, 32 + index);
     }
