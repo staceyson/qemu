@@ -3108,7 +3108,7 @@ void tcg_gen_qemu_ld_i64_with_checked_addr(TCGv_i64 val, TCGv_cap_checked_ptr ad
         }
     }
 #if defined(CONFIG_TCG_LOG_INSTR)
-    TCGv_i32 tcop = tcg_const_i32(memop);
+    TCGv_i32 tcop = tcg_const_i32(make_memop_idx(memop, idx));
     if (tcg_ctx_logging_enabled) {
         gen_helper_qemu_log_instr_load64(cpu_env, saved_load_addr, val, tcop);
     }
