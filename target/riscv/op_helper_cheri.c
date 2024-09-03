@@ -113,40 +113,12 @@ struct SCRInfo {
     [CheriSCR_BSEPCC] = {.r = true, .w = true, .access = H_ASR, .name= "BSTCC"},
 };
 
-static inline cap_register_t *get_scr(CPUArchState *env, uint32_t index)
-{
-    switch (index) {
-    case CheriSCR_PCC: return &env->pcc;
-    case CheriSCR_DDC: return &env->ddc;
-
-    case CheriSCR_UTCC: return &env->utcc;
-    case CheriSCR_UTDC: return &env->utdc;
-    case CheriSCR_UScratchC: return &env->uscratchc;
-    case CheriSCR_UEPCC: return &env->uepcc;
-
-    case CheriSCR_STCC: return &env->stcc;
-    case CheriSCR_STDC: return &env->stdc;
-    case CheriSCR_SScratchC: return &env->sscratchc;
-    case CheriSCR_SEPCC: return &env->sepcc;
-
-    case CheriSCR_MTCC: return &env->mtcc;
-    case CheriSCR_MTDC: return &env->mtdc;
-    case CheriSCR_MScratchC: return &env->mscratchc;
-    case CheriSCR_MEPCC: return &env->mepcc;
-
-    case CheriSCR_BSTCC: return &env->vstcc;
-    case CheriSCR_BSTDC: return &env->vstdc;
-    case CheriSCR_BSScratchC: return &env->vsscratchc;
-    case CheriSCR_BSEPCC: return &env->vsepcc;
-    default: assert(false && "Should have raised an invalid inst trap!");
-    }
-}
-
 #ifdef CONFIG_TCG_LOG_INSTR
 void riscv_log_instr_scr_changed(CPURISCVState *env, int scrno)
 {
     if (qemu_log_instr_enabled(env)) {
-        qemu_log_instr_cap(env, scr_info[scrno].name, get_scr(env, scrno));
+        qemu_log_instr_cap(env, scr_info[scrno].name,
+                           riscv_get_scr(env, scrno));
     }
 }
 #endif
@@ -171,7 +143,7 @@ void HELPER(cspecialrw)(CPUArchState *env, uint32_t cd, uint32_t cs,
     if (scr_min_priv(mode) > env->priv) {
         raise_cheri_exception(env, CapEx_AccessSystemRegsViolation, 32 + index);
     }
-    cap_register_t *scr = get_scr(env, index);
+    cap_register_t *scr = riscv_get_scr(env, index);
     // Make a copy of the write value in case cd == cs
     cap_register_t new_val = *get_readonly_capreg(env, cs);
     if (cd != 0) {
