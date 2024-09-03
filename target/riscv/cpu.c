@@ -288,7 +288,7 @@ static void riscv_cpu_dump_state(CPUState *cs, FILE *f, int flags)
 #endif
     qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "pc      ", PC_ADDR(env));
 #ifdef TARGET_CHERI
-    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "pc (offset) ", GET_SPECIAL_REG_ARCH(env, pc, PCC));
+    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "pc (offset) ", GET_SPECIAL_REG_ARCH(env, pc, pcc));
 #endif
 #ifndef CONFIG_USER_ONLY
     qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "mhartid ", env->mhartid);
@@ -312,15 +312,15 @@ static void riscv_cpu_dump_state(CPUState *cs, FILE *f, int flags)
     if (riscv_has_ext(env, RVH)) {
         qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "hedeleg ", env->hedeleg);
     }
-    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "mtvec   ", GET_SPECIAL_REG_ARCH(env, mtvec, MTCC));
-    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "stvec   ", GET_SPECIAL_REG_ARCH(env, stvec, STCC));
+    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "mtvec   ", GET_SPECIAL_REG_ARCH(env, mtvec, mtcc));
+    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "stvec   ", GET_SPECIAL_REG_ARCH(env, stvec, stcc));
     if (riscv_has_ext(env, RVH)) {
-        qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "vstvec  ", GET_SPECIAL_REG_ARCH(env, vstvec, VSTCC));
+        qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "vstvec  ", GET_SPECIAL_REG_ARCH(env, vstvec, vstcc));
     }
-    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "mepc    ", GET_SPECIAL_REG_ARCH(env, mepc, MEPCC));
-    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "sepc    ", GET_SPECIAL_REG_ARCH(env, sepc, SEPCC));
+    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "mepc    ", GET_SPECIAL_REG_ARCH(env, mepc, mepcc));
+    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "sepc    ", GET_SPECIAL_REG_ARCH(env, sepc, sepcc));
     if (riscv_has_ext(env, RVH)) {
-        qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "vsepc   ", GET_SPECIAL_REG_ARCH(env, vsepc, VSEPCC));
+        qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "vsepc   ", GET_SPECIAL_REG_ARCH(env, vsepc, vsepcc));
     }
     qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "mcause  ", env->mcause);
     qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "scause  ", env->scause);
@@ -358,7 +358,7 @@ static void riscv_cpu_set_pc(CPUState *cs, vaddr value)
     RISCVCPU *cpu = RISCV_CPU(cs);
     CPURISCVState *env = &cpu->env;
 #ifdef TARGET_CHERI
-    cheri_update_pcc(&env->PCC, value, /*can_be_unrepresentable=*/true);
+    cheri_update_pcc(&env->pcc, value, /*can_be_unrepresentable=*/true);
 #else
     env->pc = value;
 #endif
@@ -397,11 +397,11 @@ void restore_state_to_opc(CPURISCVState *env, TranslationBlock *tb,
                           target_ulong *data)
 {
 #ifdef TARGET_CHERI
-    assert(cap_is_in_bounds(&env->PCC, data[0], 1));
-    if (unlikely(env->PCC._cr_cursor != data[0])) {
+    assert(cap_is_in_bounds(&env->pcc, data[0], 1));
+    if (unlikely(env->pcc._cr_cursor != data[0])) {
         qemu_log_instr_or_mask_msg(env, CPU_LOG_INT,
             "%s: Updating pc from TB: " TARGET_FMT_lx " -> " TARGET_FMT_lx "\n",
-            __func__, (target_ulong)env->PCC._cr_cursor, data[0]);
+            __func__, (target_ulong)env->pcc._cr_cursor, data[0]);
     }
 #endif
     riscv_update_pc(env, data[0], /*can_be_unrepresentable=*/false);
@@ -522,7 +522,7 @@ void rvfi_dii_communicate(CPUState* cs, CPURISCVState* env, bool was_trap) {
     static bool rvfi_dii_started = false;
     static unsigned rvfi_dii_version = 1;
     // Single-step completed -> update PC in the trace buffer
-    env->rvfi_dii_trace.PC.rvfi_pc_wdata = GET_SPECIAL_REG_ARCH(env, pc, PCC);
+    env->rvfi_dii_trace.PC.rvfi_pc_wdata = GET_SPECIAL_REG_ARCH(env, pc, pcc);
     env->rvfi_dii_trace.INST.rvfi_order++;
 
     // TestRIG expects a zero $pc after a trap:
@@ -658,7 +658,7 @@ void rvfi_dii_communicate(CPUState* cs, CPURISCVState* env, bool was_trap) {
             tb_flush(cs); // flush TCG state
             env->rvfi_dii_injected_insn = cmd_buf.rvfi_dii_insn;
             env->rvfi_dii_have_injected_insn = true;
-            env->rvfi_dii_trace.PC.rvfi_pc_rdata = GET_SPECIAL_REG_ARCH(env, pc, PCC);
+            env->rvfi_dii_trace.PC.rvfi_pc_rdata = GET_SPECIAL_REG_ARCH(env, pc, pcc);
             env->rvfi_dii_trace.INST.rvfi_mode = env->priv;
             env->rvfi_dii_trace.INST.rvfi_ixl = get_field(env->misa, MISA_MXL);
             resume_all_vcpus();
@@ -736,23 +736,23 @@ static void riscv_cpu_reset(DeviceState *dev)
     /*
      * See Table 5.2: Special Capability Registers (SCRs) in the CHERI ISA spec
      */
-    set_max_perms_capability(&env->PCC, env->resetvec);
-    set_max_perms_capability(&env->DDC, 0);
+    set_max_perms_capability(&env->pcc, env->resetvec);
+    set_max_perms_capability(&env->ddc, 0);
     // User mode trap handling:
-    set_max_perms_capability(&env->UTCC, 0);
-    null_capability(&env->UTDC);
-    null_capability(&env->UScratchC);
-    set_max_perms_capability(&env->UEPCC, 0);
+    set_max_perms_capability(&env->utcc, 0);
+    null_capability(&env->utdc);
+    null_capability(&env->uscratchc);
+    set_max_perms_capability(&env->uepcc, 0);
     // Supervisor mode trap handling
-    set_max_perms_capability(&env->STCC, 0);
-    null_capability(&env->STDC);
-    null_capability(&env->SScratchC);
-    set_max_perms_capability(&env->SEPCC, 0);
+    set_max_perms_capability(&env->stcc, 0);
+    null_capability(&env->stdc);
+    null_capability(&env->sscratchc);
+    set_max_perms_capability(&env->sepcc, 0);
     // Machine mode trap handling
-    set_max_perms_capability(&env->MTCC, 0);
-    null_capability(&env->MTDC);
-    null_capability(&env->MScratchC);
-    set_max_perms_capability(&env->MEPCC, 0);
+    set_max_perms_capability(&env->mtcc, 0);
+    null_capability(&env->mtdc);
+    null_capability(&env->mscratchc);
+    set_max_perms_capability(&env->mepcc, 0);
 #endif /* TARGET_CHERI */
 #ifdef CONFIG_DEBUG_TCG
     env->_pc_is_current = true;

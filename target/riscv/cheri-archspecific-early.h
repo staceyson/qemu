@@ -117,14 +117,14 @@ enum CheriSCR {
 #define CINVOKE_DATA_REGNUM 31
 
 static inline const cap_register_t *cheri_get_ddc(CPURISCVState *env) {
-    cheri_debug_assert(env->DDC.cr_extra == CREG_FULLY_DECOMPRESSED);
-    return &env->DDC;
+    cheri_debug_assert(env->ddc.cr_extra == CREG_FULLY_DECOMPRESSED);
+    return &env->ddc;
 }
 
 static inline const cap_register_t *_cheri_get_pcc_unchecked(CPURISCVState *env)
 {
-    cheri_debug_assert(env->PCC.cr_extra == CREG_FULLY_DECOMPRESSED);
-    return &env->PCC;
+    cheri_debug_assert(env->pcc.cr_extra == CREG_FULLY_DECOMPRESSED);
+    return &env->pcc;
 }
 
 static inline GPCapRegs *cheri_get_gpcrs(CPUArchState *env) {

@@ -116,28 +116,28 @@ struct SCRInfo {
 static inline cap_register_t *get_scr(CPUArchState *env, uint32_t index)
 {
     switch (index) {
-    case CheriSCR_PCC: return &env->PCC;
-    case CheriSCR_DDC: return &env->DDC;
+    case CheriSCR_PCC: return &env->pcc;
+    case CheriSCR_DDC: return &env->ddc;
 
-    case CheriSCR_UTCC: return &env->UTCC;
-    case CheriSCR_UTDC: return &env->UTDC;
-    case CheriSCR_UScratchC: return &env->UScratchC;
-    case CheriSCR_UEPCC: return &env->UEPCC;
+    case CheriSCR_UTCC: return &env->utcc;
+    case CheriSCR_UTDC: return &env->utdc;
+    case CheriSCR_UScratchC: return &env->uscratchc;
+    case CheriSCR_UEPCC: return &env->uepcc;
 
-    case CheriSCR_STCC: return &env->STCC;
-    case CheriSCR_STDC: return &env->STDC;
-    case CheriSCR_SScratchC: return &env->SScratchC;
-    case CheriSCR_SEPCC: return &env->SEPCC;
+    case CheriSCR_STCC: return &env->stcc;
+    case CheriSCR_STDC: return &env->stdc;
+    case CheriSCR_SScratchC: return &env->sscratchc;
+    case CheriSCR_SEPCC: return &env->sepcc;
 
-    case CheriSCR_MTCC: return &env->MTCC;
-    case CheriSCR_MTDC: return &env->MTDC;
-    case CheriSCR_MScratchC: return &env->MScratchC;
-    case CheriSCR_MEPCC: return &env->MEPCC;
+    case CheriSCR_MTCC: return &env->mtcc;
+    case CheriSCR_MTDC: return &env->mtdc;
+    case CheriSCR_MScratchC: return &env->mscratchc;
+    case CheriSCR_MEPCC: return &env->mepcc;
 
-    case CheriSCR_BSTCC: return &env->VSTCC;
-    case CheriSCR_BSTDC: return &env->VSTDC;
-    case CheriSCR_BSScratchC: return &env->VSScratchC;
-    case CheriSCR_BSEPCC: return &env->VSEPCC;
+    case CheriSCR_BSTCC: return &env->vstcc;
+    case CheriSCR_BSTDC: return &env->vstdc;
+    case CheriSCR_BSScratchC: return &env->vsscratchc;
+    case CheriSCR_BSEPCC: return &env->vsepcc;
     default: assert(false && "Should have raised an invalid inst trap!");
     }
 }
@@ -155,7 +155,7 @@ void HELPER(cspecialrw)(CPUArchState *env, uint32_t cd, uint32_t cs,
                         uint32_t index)
 {
     uintptr_t _host_return_address = GETPC();
-    // Ensure that env->PCC.cursor is correct:
+    // Ensure that env->pcc.cursor is correct:
     cpu_restore_state(env_cpu(env), _host_return_address, false);
 
     assert(index <= 31 && "Bug in translator?");

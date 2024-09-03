@@ -33,7 +33,7 @@ int riscv_cpu_gdb_read_register(CPUState *cs, GByteArray *mem_buf, int n)
     if (n < 32) {
         return gdb_get_regl(mem_buf, gpr_int_value(env, n));
     } else if (n == 32) {
-        return gdb_get_regl(mem_buf, GET_SPECIAL_REG_ARCH(env, pc, PCC));
+        return gdb_get_regl(mem_buf, GET_SPECIAL_REG_ARCH(env, pc, pcc));
     }
     return 0;
 }
@@ -51,7 +51,7 @@ int riscv_cpu_gdb_write_register(CPUState *cs, uint8_t *mem_buf, int n)
         return sizeof(target_ulong);
     } else if (n == 32) {
         /* TODO(am2419): arguably we don't want to log changes from gdb */
-        SET_SPECIAL_REG(env, pc, PCC, ldtul_p(mem_buf));
+        SET_SPECIAL_REG(env, pc, pcc, ldtul_p(mem_buf));
         return sizeof(target_ulong);
     }
     return 0;

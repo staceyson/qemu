@@ -136,8 +136,8 @@ struct CPURISCVState {
     target_ulong vtype;
 
 #ifdef TARGET_CHERI
-    cap_register_t PCC; // SCR 0 Program counter cap. (PCC) TODO: implement this properly
-    cap_register_t DDC; // SCR 1 Default data cap. (DDC)
+    cap_register_t pcc; // SCR 0 Program counter cap. (PCC) TODO: implement this properly
+    cap_register_t ddc; // SCR 1 Default data cap. (DDC)
 #else
     target_ulong pc;
 #endif
@@ -200,17 +200,17 @@ struct CPURISCVState {
 
 #ifdef TARGET_CHERI
     // XXX: not implemented properly
-    cap_register_t UTCC; // SCR 4 User trap code cap. (UTCC)
-    cap_register_t UTDC; // SCR 5 User trap data cap. (UTDC)
-    cap_register_t UScratchC; // SCR 6 User scratch cap. (UScratchC)
-    cap_register_t UEPCC; // SCR 7 User exception PC cap. (UEPCC)
+    cap_register_t utcc; // SCR 4 User trap code cap. (UTCC)
+    cap_register_t utdc; // SCR 5 User trap data cap. (UTDC)
+    cap_register_t uscratchc; // SCR 6 User scratch cap. (UScratchC)
+    cap_register_t uepcc; // SCR 7 User exception PC cap. (UEPCC)
 #endif
 
 #ifdef TARGET_CHERI
-    cap_register_t STCC;      // SCR 12 Supervisor trap code cap. (STCC)
-    cap_register_t STDC;      // SCR 13 Supervisor trap data cap. (STDC)
-    cap_register_t SScratchC; // SCR 14 Supervisor scratch cap. (SScratchC)
-    cap_register_t SEPCC;     // SCR 15 Supervisor exception PC cap. (SEPCC)
+    cap_register_t stcc;      // SCR 12 Supervisor trap code cap. (STCC)
+    cap_register_t stdc;      // SCR 13 Supervisor trap data cap. (STDC)
+    cap_register_t sscratchc; // SCR 14 Supervisor scratch cap. (SScratchC)
+    cap_register_t sepcc;     // SCR 15 Supervisor exception PC cap. (SEPCC)
 #else
     target_ulong stvec;
     target_ulong sepc;
@@ -218,10 +218,10 @@ struct CPURISCVState {
     target_ulong scause;
 
 #ifdef TARGET_CHERI
-    cap_register_t MTCC;      // SCR 28 Machine trap code cap. (MTCC)
-    cap_register_t MTDC;      // SCR 29 Machine trap data cap. (MTDC)
-    cap_register_t MScratchC; // SCR 30 Machine scratch cap. (MScratchC)
-    cap_register_t MEPCC;     // SCR 31 Machine exception PC cap. (MEPCC)
+    cap_register_t mtcc;      // SCR 28 Machine trap code cap. (MTCC)
+    cap_register_t mtdc;      // SCR 29 Machine trap data cap. (MTDC)
+    cap_register_t mscratchc; // SCR 30 Machine scratch cap. (MScratchC)
+    cap_register_t mepcc;     // SCR 31 Machine exception PC cap. (MEPCC)
 #else
     target_ulong mtvec;
     target_ulong mepc;
@@ -241,10 +241,10 @@ struct CPURISCVState {
 
     /* Virtual CSRs */
 #ifdef TARGET_CHERI
-    cap_register_t VSTCC;
-    cap_register_t VSTDC;
-    cap_register_t VSScratchC;
-    cap_register_t VSEPCC;
+    cap_register_t vstcc;
+    cap_register_t vstdc;
+    cap_register_t vsscratchc;
+    cap_register_t vsepcc;
 #else
     target_ulong vstvec;
     target_ulong vsepc;
@@ -264,8 +264,8 @@ struct CPURISCVState {
 
     /* HS Backup CSRs */
 #ifdef TARGET_CHERI
-    cap_register_t STCC_HS;
-    cap_register_t SEPCC_HS;
+    cap_register_t stcc_hs;
+    cap_register_t sepcc_hs;
 #else
     target_ulong stvec_hs;
     target_ulong sepc_hs;
@@ -372,7 +372,7 @@ static inline bool pc_is_current(CPURISCVState *env)
 // that shouldn't really matter.
 static inline target_ulong cpu_get_recent_pc(CPURISCVState *env) {
 #ifdef TARGET_CHERI
-    return env->PCC._cr_cursor;
+    return env->pcc._cr_cursor;
 #else
     return env->pc;
 #endif
@@ -712,7 +712,7 @@ riscv_cpu_get_tb_cpu_state(CPURISCVState *env, target_ulong *pc,
     uint32_t flags = 0;
     *pc = PC_ADDR(env); // We want the full virtual address here (no offset)
 #ifdef TARGET_CHERI
-    cheri_cpu_get_tb_cpu_state(&env->PCC, &env->DDC, cs_base, cs_top,
+    cheri_cpu_get_tb_cpu_state(&env->pcc, &env->ddc, cs_base, cs_top,
                                cheri_flags);
 #else
     *cs_base = 0;

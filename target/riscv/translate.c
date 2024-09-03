@@ -1104,10 +1104,10 @@ void riscv_translate_init(void)
 
 #ifdef TARGET_CHERI
     cpu_pc = tcg_global_mem_new(cpu_env,
-                                offsetof(CPURISCVState, PCC._cr_cursor), "pc");
+                                offsetof(CPURISCVState, pcc._cr_cursor), "pc");
     /// XXXAR: We currently interpose using DDC.cursor and not DDC.base!
     ddc_interposition = tcg_global_mem_new(
-        cpu_env, offsetof(CPURISCVState, DDC._cr_cursor), "ddc_interpose");
+        cpu_env, offsetof(CPURISCVState, ddc._cr_cursor), "ddc_interpose");
 #else
     cpu_pc = tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, pc), "pc");
 #endif

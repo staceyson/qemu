@@ -67,7 +67,7 @@ static inline void riscv_update_pc(CPURISCVState *env, target_ulong pc_addr,
                                    bool can_be_unrepresentable)
 {
 #ifdef TARGET_CHERI
-    cheri_update_pcc(&env->PCC, pc_addr, can_be_unrepresentable);
+    cheri_update_pcc(&env->pcc, pc_addr, can_be_unrepresentable);
 #else
     env->pc = pc_addr;
 #endif

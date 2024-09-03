@@ -119,8 +119,8 @@ static inline void update_next_pcc_for_tcg(CPUArchState *env,
                                            uint32_t cjalr_flags)
 {
     assert_valid_jump_target(target);
-    // On return to TCG we will jump there immediately, so update env->PCC now.
-    env->PCC = *target;
+    // On return to TCG we will jump there immediately, so update env->pcc now.
+    env->pcc = *target;
 #ifdef CONFIG_DEBUG_TCG
     env->_pc_is_current = true; // PCC.cursor is up-to-date again.
 #endif

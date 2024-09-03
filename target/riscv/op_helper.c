@@ -119,7 +119,7 @@ target_ulong helper_sret(CPURISCVState *env, target_ulong cpu_pc_deb)
     }
 #endif
 
-    target_ulong retpc = GET_SPECIAL_REG_ADDR(env, sepc, SEPCC);
+    target_ulong retpc = GET_SPECIAL_REG_ADDR(env, sepc, sepcc);
     // We have to clear the low bit of the address since that is defined as zero
     // in the privileged spec. The cheri_update_pcc_for_exc_return() check below
     // will de-tag pcc if this would result changing the address for sealed caps.
@@ -174,9 +174,9 @@ target_ulong helper_sret(CPURISCVState *env, target_ulong cpu_pc_deb)
     riscv_cpu_set_mode(env, prev_priv);
 
 #ifdef TARGET_CHERI
-    cheri_update_pcc_for_exc_return(&env->PCC, &env->SEPCC, retpc);
+    cheri_update_pcc_for_exc_return(&env->pcc, &env->sepcc, retpc);
     /* TODO(am2419): do we log PCC as a changed register? */
-    qemu_log_instr_dbg_cap(env, "PCC", &env->PCC);
+    qemu_log_instr_dbg_cap(env, "PCC", &env->pcc);
 #endif
     return retpc;
 }
@@ -193,7 +193,7 @@ target_ulong helper_mret(CPURISCVState *env, target_ulong cpu_pc_deb)
     }
 #endif
 
-    target_ulong retpc = GET_SPECIAL_REG_ADDR(env, mepc, MEPCC);
+    target_ulong retpc = GET_SPECIAL_REG_ADDR(env, mepc, mepcc);
     // We have to clear the low bit of the address since that is defined as zero
     // in the privileged spec. The cheri_update_pcc_for_exc_return() check below
     // will de-tag pcc if this would result changing the address for sealed caps.
@@ -235,9 +235,9 @@ target_ulong helper_mret(CPURISCVState *env, target_ulong cpu_pc_deb)
 #endif
 
 #ifdef TARGET_CHERI
-    cheri_update_pcc_for_exc_return(&env->PCC, &env->MEPCC, retpc);
+    cheri_update_pcc_for_exc_return(&env->pcc, &env->mepcc, retpc);
     /* TODO(am2419): do we log PCC as a changed register? */
-    qemu_log_instr_dbg_cap(env, "PCC", &env->PCC);
+    qemu_log_instr_dbg_cap(env, "PCC", &env->pcc);
 #endif
     return retpc;
 }
