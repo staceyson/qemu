@@ -1560,7 +1560,7 @@ static void log_changed_csr_fn(CPURISCVState *env, int csrno,
                                target_ulong value)
 {
     if (qemu_log_instr_enabled(env)) {
-        qemu_log_instr_reg(env, csr_ops[csrno].csr_name, value);
+        qemu_log_instr_reg(env, csr_ops[csrno].name, value);
     }
 }
 #else
@@ -1568,18 +1568,18 @@ static void log_changed_csr_fn(CPURISCVState *env, int csrno,
 #endif
 
 /* Define csr_ops entry for read-only CSR register */
-#define CSR_OP_FN_R(pred, readfn, name)                            \
+#define CSR_OP_FN_R(pred, readfn, csr_name)                        \
     {.predicate=pred, .read=readfn, .write=NULL, .op=NULL,         \
-     .log_update=NULL, .csr_name=name}
+     .log_update=NULL, .name=csr_name}
 
 /* Shorthand for functions following the read_<csr> pattern */
 #define CSR_OP_R(pred, name)                                    \
     CSR_OP_FN_R(pred, glue(read_, name), stringify(name))
 
 /* Internal - use CSR_OP_FN_RW, CSR_OP_RW and CSR_OP_NOLOG_RW */
-#define _CSR_OP_FN_RW(pred, readfn, writefn, logfn, name)          \
+#define _CSR_OP_FN_RW(pred, readfn, writefn, logfn, csr_name)      \
     {.predicate=pred, .read=readfn, .write=writefn,                \
-     .op=NULL, .log_update=logfn, .csr_name=name}
+     .op=NULL, .log_update=logfn, .name=csr_name}
 
 /* Define csr_ops entry for read-write CSR register */
 #define CSR_OP_FN_RW(pred, readfn, writefn, name)                  \
@@ -1599,10 +1599,10 @@ static void log_changed_csr_fn(CPURISCVState *env, int csrno,
                   NULL, stringify(name))
 
 /* Define csr_ops entry for read-modify-write CSR register */
-#define CSR_OP_RMW(pred, name)                                     \
+#define CSR_OP_RMW(pred, csr_name)                                 \
     {.predicate=pred, .read=NULL, .write=NULL,                     \
-     .op=glue(rmw_, name), .log_update=log_changed_csr_fn,         \
-     .csr_name=stringify(name)}
+     .op=glue(rmw_, csr_name), .log_update=log_changed_csr_fn,     \
+     .name=stringify(csr_name)}
 
 /* Control and Status Register function table */
 riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {

@@ -814,7 +814,6 @@ typedef struct {
     riscv_csr_write_fn write;
     riscv_csr_op_fn op;
     riscv_csr_log_update_fn log_update;
-    const char *csr_name;
 } riscv_csr_operations;
 
 /* CSR function table constants */
