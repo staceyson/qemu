@@ -999,6 +999,11 @@ static const char *riscv_gdb_get_dynamic_xml(CPUState *cs, const char *xmlname)
     if (strcmp(xmlname, "riscv-csr.xml") == 0) {
         return cpu->dyn_csr_xml;
     }
+#ifdef TARGET_CHERI
+    if (strcmp(xmlname, "riscv-scr.xml") == 0) {
+        return cpu->dyn_scr_xml;
+    }
+#endif
 
     return NULL;
 }

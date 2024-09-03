@@ -410,6 +410,9 @@ struct RISCVCPU {
     CPURISCVState env;
 
     char *dyn_csr_xml;
+#ifdef TARGET_CHERI
+    char *dyn_scr_xml;
+#endif
 
     /* Configuration Settings */
     struct {
