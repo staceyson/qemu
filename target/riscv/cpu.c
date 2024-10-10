@@ -968,7 +968,7 @@ static Property riscv_cpu_properties[] = {
     DEFINE_PROP_BOOL("Zicsr", RISCVCPU, cfg.ext_icsr, true),
 #ifdef TARGET_CHERI
     DEFINE_PROP_BOOL("Xcheri", RISCVCPU, cfg.ext_cheri, true),
-    DEFINE_PROP_BOOL("Xcheri_v9", RISCVCPU, cfg.ext_cheri_v9, false),
+    DEFINE_PROP_BOOL("Xcheri_v9", RISCVCPU, cfg.ext_cheri_v9, true),
 #endif
     DEFINE_PROP_STRING("priv_spec", RISCVCPU, cfg.priv_spec),
     DEFINE_PROP_STRING("vext_spec", RISCVCPU, cfg.vext_spec),
