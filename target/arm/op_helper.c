@@ -298,7 +298,7 @@ void HELPER(wfi)(CPUARMState *env, uint32_t insn_len)
 
     if (target_el) {
         if (env->aarch64) {
-            increment_aarch_reg(&env->pc, -insn_len);
+            increment_aarch_reg(&env->pc, -(target_ulong)insn_len);
         } else {
             env->regs[15] -= insn_len;
         }
