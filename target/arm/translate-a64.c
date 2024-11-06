@@ -15299,16 +15299,14 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
     insn = arm_ldl_code(env, s->base.pc_next, s->sctlr_b);
 
 #ifdef TARGET_CHERI
-
     gen_check_pcc_bounds_next_inst(s, 4);
+#endif
 
 #if defined(CONFIG_TCG_LOG_INSTR)
     if (unlikely(s->base.log_instr_enabled)) {
         gen_helper_arm_log_instr(cpu_env, tcg_constant_i64(s->pc_curr),
                                  tcg_constant_i32(insn), tcg_constant_i32(4));
     }
-
-#endif
 #endif
 
     s->insn = insn;
