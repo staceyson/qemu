@@ -54,9 +54,8 @@ TCGv_cap_checked_ptr gen_mte_and_cheri_check1(DisasContext *s, TCGv_i64 addr,
                                               bool ddc_base);
 TCGv_cap_checked_ptr gen_mte_and_cheri_checkN(DisasContext *s, TCGv_i64 addr,
                                               bool is_read, bool is_write,
-                                              bool tag_checked, int log2_esize,
-                                              int total_size, int base_reg,
-                                              bool alternate_base,
+                                              bool tag_checked, int size,
+                                              int base_reg, bool alternate_base,
                                               bool ddc_base);
 
 /* We should have at some point before trying to access an FP register
