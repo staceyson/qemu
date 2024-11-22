@@ -19,7 +19,8 @@
 /* Might cause an exception, so have a longjmp destination ready */
 static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
                                           target_ulong cs_base,
-                                          target_ulong cs_top,
+                                          target_ulong pcc_base,
+                                          target_ulong pcc_top,
                                           uint32_t cheri_flags,
                                           uint32_t flags, uint32_t cflags)
 {
@@ -35,14 +36,16 @@ static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
     if (likely(tb &&
                tb->pc == pc &&
                tb->cs_base == cs_base &&
-               tb->cs_top == cs_top &&
+               tb->pcc_base == pcc_base &&
+               tb->pcc_top == pcc_top &&
                tb->cheri_flags == cheri_flags &&
                tb->flags == flags &&
                tb->trace_vcpu_dstate == *cpu->trace_dstate &&
                tb_cflags(tb) == cflags)) {
         return tb;
     }
-    tb = tb_htable_lookup(cpu, pc, cs_base, cs_top, cheri_flags, flags, cflags);
+    tb = tb_htable_lookup(cpu, pc, cs_base, pcc_base, pcc_top, cheri_flags,
+                          flags, cflags);
 
     if (tb == NULL) {
         return NULL;

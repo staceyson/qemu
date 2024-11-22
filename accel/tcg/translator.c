@@ -58,8 +58,8 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
     db->max_insns = max_insns;
     db->singlestep_enabled = cpu->singlestep_enabled;
 #ifdef TARGET_CHERI
-    db->pcc_base = tb->cs_base;
-    db->pcc_top = tb->cs_top;
+    db->pcc_base = tb->pcc_base;
+    db->pcc_top = tb->pcc_top;
     cheri_debug_assert(db->pcc_base ==
                        cap_get_base(cheri_get_recent_pcc(cpu->env_ptr)));
     cheri_debug_assert(db->pcc_top ==

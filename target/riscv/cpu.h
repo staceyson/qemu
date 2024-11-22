@@ -709,13 +709,14 @@ static inline uint32_t vext_get_vlmax(RISCVCPU *cpu, target_ulong vtype)
 
 static inline void
 riscv_cpu_get_tb_cpu_state(CPURISCVState *env, target_ulong *pc,
-                           target_ulong *cs_base, target_ulong *cs_top,
-                           uint32_t *cheri_flags, uint32_t *pflags)
+                           target_ulong *cs_base, target_ulong *pcc_base,
+                           target_ulong *pcc_top, uint32_t *cheri_flags,
+                           uint32_t *pflags)
 {
     uint32_t flags = 0;
     *pc = PC_ADDR(env); // We want the full virtual address here (no offset)
 #ifdef TARGET_CHERI
-    cheri_cpu_get_tb_cpu_state(&env->pcc, &env->ddc, cs_base, cs_top,
+    cheri_cpu_get_tb_cpu_state(&env->pcc, &env->ddc, pcc_base, pcc_top,
                                cheri_flags);
 #else
     *cs_base = 0;
@@ -755,7 +756,7 @@ riscv_cpu_get_tb_cpu_state(CPURISCVState *env, target_ulong *pc,
     *pflags = flags;
 }
 // Ugly macro hack to avoid having to modify cpu_get_tb_cpu_state in all targets
-#define cpu_get_tb_cpu_state_6 riscv_cpu_get_tb_cpu_state
+#define cpu_get_tb_cpu_state_ext riscv_cpu_get_tb_cpu_state
 
 #ifdef CONFIG_TCG_LOG_INSTR
 #define RISCV_LOG_INSTR_CPU_U QEMU_LOG_INSTR_CPU_USER
