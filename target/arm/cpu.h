@@ -3717,7 +3717,6 @@ FIELD(TBFLAG_ANY, ALIGN_MEM, 12, 1)
 #define CCTLR_SBL (1 << 7)
 
 #define CCTLR_DEFINED_START 2
-#define CCTLR_DEFINED_LENGTH 6
 
 FIELD(TBFLAG_CHERI, CCTLR, 0, 6) // The 6 defined bits from CCTLR at all levels
 FIELD(TBFLAG_CHERI, PSTATE_C64, 6, 1) // The PSTATE.C64 bit
@@ -3728,9 +3727,9 @@ FIELD(TBFLAG_CHERI, SETTAG, 9, 1)
 FIELD(TBFLAG_CHERI, CAP_ENABLED, 10, 1)
 // These flags really belongs in TBFLAG_ANY, but there is no room. If upstream
 // wants this feature, then they can move some bits around
-FIELD(TBFLAG_CHERI, SCTLRA, 11, 1)
-FIELD(TBFLAG_CHERI, SCTLRSA, 12, 1)
-#define TBFLAG_CHERI_SIZE (CCTLR_DEFINED_LENGTH + 7)
+FIELD(TBFLAG_CHERI, SCTLRSA, 11, 1)
+#define TBFLAG_END(flag) (R_##flag##_SHIFT + R_##flag##_LENGTH)
+#define TBFLAG_CHERI_SIZE TBFLAG_END(TBFLAG_CHERI_SCTLRSA)
 _Static_assert(TBFLAG_CHERI_SIZE <= 32, "");
 
 #endif
@@ -4770,9 +4769,6 @@ static inline uint32_t arm_rebuild_chflags_el(CPUARMState *env, int el)
         chflags = FIELD_DP32(chflags, TBFLAG_CHERI, CAP_ENABLED, 1);
     }
     uint64_t sctlr = arm_sctlr(env, el);
-    if (sctlr & SCTLR_A) {
-        chflags = FIELD_DP32(chflags, TBFLAG_CHERI, SCTLRA, 1);
-    }
     if ((el == 0) ? (sctlr & SCTLR_SA0) : (sctlr & SCTLR_SA)) {
         chflags = FIELD_DP32(chflags, TBFLAG_CHERI, SCTLRSA, 1);
     }

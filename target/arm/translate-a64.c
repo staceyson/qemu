@@ -67,15 +67,6 @@ static inline bool cctlr_set(DisasContext *ctx, uint32_t bits)
     return (ctx->base.cheri_flags & mask) == mask;
 }
 
-static inline MemOp memop_align_sctlr(DisasContext *ctx)
-{
-#ifdef STRICT_ALIGNMENT_CHECKS
-    return GET_FLAG(ctx, SCTLRA) ? MO_ALIGN : 0;
-#else
-    return 0;
-#endif
-}
-
 static inline bool get_sctlr_sa(DisasContext *ctx)
 {
 #ifdef STRICT_ALIGNMENT_CHECKS

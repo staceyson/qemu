@@ -446,9 +446,10 @@ static inline __attribute__((always_inline)) bool load_store_implementation(
         } else if (!vector) {
             MemOp memop = ctx->be_data + size;
 
-            bool fault_unaligned = exclusive || acquire_release;
-            if (fault_unaligned || memop_align_sctlr(ctx))
+            if (exclusive || acquire_release)
                 memop |= MO_ALIGN;
+            else
+                memop = finalize_memop(ctx, memop);  /* enforce alignment */
 
             TCGv_i64 tcg_rd = cpu_reg_maybe_0(ctx, rd);
             TCGv_i64 tcg_rd2;
