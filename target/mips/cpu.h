@@ -1477,21 +1477,20 @@ target_ulong exception_resume_pc(CPUMIPSState *env);
 
 static inline void
 mips_cpu_get_tb_cpu_state(CPUMIPSState *env, target_ulong *pc,
-                          target_ulong *cs_base, target_ulong *cs_top,
-                          uint32_t *cheri_flags, uint32_t *flags)
+                          target_ulong *cs_base, target_ulong *pcc_base,
+                          target_ulong *pcc_top, uint32_t *cheri_flags,
+                          uint32_t *flags)
 {
     *pc = PC_ADDR(env); // We want the full virtual address here (no offset)
     *flags = env->hflags &
              (MIPS_HFLAG_TMASK | MIPS_HFLAG_BMASK | MIPS_HFLAG_HWRENA_ULR);
 #ifdef TARGET_CHERI
     cheri_cpu_get_tb_cpu_state(&env->active_tc.PCC, &env->active_tc.CHWR.DDC,
-                               cs_base, cs_top, cheri_flags);
-#else
-    *cs_base = 0;
+                               pcc_base, pcc_top, cheri_flags);
 #endif
 }
 // Ugly macro hack to avoid having to modify cpu_get_tb_cpu_state in all targets
-#define cpu_get_tb_cpu_state_6 mips_cpu_get_tb_cpu_state
+#define cpu_get_tb_cpu_state_ext mips_cpu_get_tb_cpu_state
 
 static inline bool should_use_error_epc(CPUMIPSState *env)
 {

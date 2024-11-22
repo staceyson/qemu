@@ -13873,8 +13873,9 @@ static inline void assert_hflags_rebuild_correctly(CPUARMState *env)
 }
 
 void aarch_cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
-                                target_ulong *cs_base, target_ulong *cs_top,
-                                uint32_t *cheri_flags, uint32_t *pflags)
+                                target_ulong *cs_base, target_ulong *pcc_base,
+                                target_ulong *pcc_top, uint32_t *cheri_flags,
+                                uint32_t *pflags)
 {
     CPUARMTBFlags flags;
 
@@ -13885,11 +13886,9 @@ void aarch_cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
         *pc = get_aarch_reg_as_x(&env->pc);
 #ifdef TARGET_CHERI
         cheri_cpu_get_tb_cpu_state(_cheri_get_pcc_unchecked(env),
-                                   cheri_get_ddc(env), cs_base, cs_top,
+                                   cheri_get_ddc(env), pcc_base, pcc_top,
                                    cheri_flags);
         *cheri_flags |= (env->chflags << TB_FLAG_CHERI_SPARE_INDEX_START);
-#else
-        *cs_base = 0;
 #endif
         if (cpu_isar_feature(aa64_bti, env_archcpu(env))) {
             DP_TBFLAG_A64(flags, BTYPE, env->btype);

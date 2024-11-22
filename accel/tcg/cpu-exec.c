@@ -166,10 +166,10 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 
     qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                            "Trace %d: %p [" TARGET_FMT_lx "/" TARGET_FMT_lx
-                           "/" TARGET_FMT_lx "/%#x/%#x] %s\n",
+                           "/" TARGET_FMT_lx "-" TARGET_FMT_lx "/%#x/%#x] %s\n",
                            cpu->cpu_index, itb->tc.ptr, itb->cs_base, itb->pc,
-                           itb->cs_top, itb->cheri_flags, itb->flags,
-                           lookup_symbol(itb->pc));
+                           itb->pcc_base, itb->pcc_top, itb->cheri_flags,
+                           itb->flags, lookup_symbol(itb->pc));
 
 #if defined(DEBUG_DISAS)
     if (qemu_loglevel_mask(CPU_LOG_TB_CPU)
@@ -247,7 +247,7 @@ void cpu_exec_step_atomic(CPUState *cpu)
 {
     CPUArchState *env = (CPUArchState *)cpu->env_ptr;
     TranslationBlock *tb;
-    target_ulong cs_base, cs_top = 0, pc;
+    target_ulong cs_base, pcc_base = 0, pcc_top = 0, pc;
     uint32_t cheri_flags = 0;
     uint32_t flags;
     uint32_t cflags = (curr_cflags(cpu) & ~CF_PARALLEL) | 1;
@@ -259,13 +259,15 @@ void cpu_exec_step_atomic(CPUState *cpu)
         g_assert(!cpu->running);
         cpu->running = true;
 
-        cpu_get_tb_cpu_state_6(env, &pc, &cs_base, &cs_top, &cheri_flags, &flags);
-        tb = tb_lookup(cpu, pc, cs_base, cs_top, cheri_flags, flags, cflags);
+        cpu_get_tb_cpu_state_ext(env, &pc, &cs_base, &pcc_base, &pcc_top,
+                                 &cheri_flags, &flags);
+        tb = tb_lookup(cpu, pc, cs_base, pcc_base, pcc_top, cheri_flags, flags,
+                       cflags);
 
         if (tb == NULL) {
             mmap_lock();
-            tb = tb_gen_code(cpu, pc, cs_base, cs_top, cheri_flags, flags,
-                             cflags);
+            tb = tb_gen_code(cpu, pc, cs_base, pcc_base, pcc_top, cheri_flags,
+                             flags, cflags);
             mmap_unlock();
         }
 
@@ -303,7 +305,8 @@ void cpu_exec_step_atomic(CPUState *cpu)
 struct tb_desc {
     target_ulong pc;
     target_ulong cs_base;
-    target_ulong cs_top;
+    target_ulong pcc_base;
+    target_ulong pcc_top;
     CPUArchState *env;
     tb_page_addr_t phys_page1;
     uint32_t cheri_flags;
@@ -318,8 +321,9 @@ static bool tb_lookup_cmp(const void *p, const void *d)
     const struct tb_desc *desc = d;
 
     if (tb->pc == desc->pc && tb->page_addr[0] == desc->phys_page1 &&
-        tb->cs_base == desc->cs_base && tb->cs_top == desc->cs_top &&
-        tb->cheri_flags == desc->cheri_flags && tb->flags == desc->flags &&
+        tb->cs_base == desc->cs_base && tb->pcc_base == desc->pcc_base &&
+        tb->pcc_top == desc->pcc_top && tb->cheri_flags == desc->cheri_flags &&
+        tb->flags == desc->flags &&
         tb->trace_vcpu_dstate == desc->trace_vcpu_dstate &&
         tb_cflags(tb) == desc->cflags) {
         /* check next page if needed */
@@ -340,9 +344,9 @@ static bool tb_lookup_cmp(const void *p, const void *d)
 }
 
 TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
-                                   target_ulong cs_base, target_ulong cs_top,
-                                   uint32_t cheri_flags, uint32_t flags,
-                                   uint32_t cflags)
+                                   target_ulong cs_base, target_ulong pcc_base,
+                                   target_ulong pcc_top, uint32_t cheri_flags,
+                                   uint32_t flags, uint32_t cflags)
 {
     tb_page_addr_t phys_pc;
     struct tb_desc desc;
@@ -350,7 +354,8 @@ TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
 
     desc.env = (CPUArchState *)cpu->env_ptr;
     desc.cs_base = cs_base;
-    desc.cs_top = cs_top;
+    desc.pcc_base = pcc_base;
+    desc.pcc_top = pcc_top;
     desc.cheri_flags = cheri_flags;
     desc.flags = flags;
     desc.cflags = cflags;
@@ -425,16 +430,19 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 {
     CPUArchState *env = (CPUArchState *)cpu->env_ptr;
     TranslationBlock *tb;
-    target_ulong cs_base, cs_top = 0, pc;
+    target_ulong cs_base, pcc_base = 0, pcc_top = 0, pc;
     uint32_t cheri_flags = 0;
     uint32_t flags;
 
-    cpu_get_tb_cpu_state_6(env, &pc, &cs_base, &cs_top, &cheri_flags, &flags);
+    cpu_get_tb_cpu_state_ext(env, &pc, &cs_base, &pcc_base, &pcc_top,
+                             &cheri_flags, &flags);
 
-    tb = tb_lookup(cpu, pc, cs_base, cs_top, cheri_flags, flags, cflags);
+    tb = tb_lookup(cpu, pc, cs_base, pcc_base, pcc_top, cheri_flags, flags,
+                   cflags);
     if (tb == NULL) {
         mmap_lock();
-        tb = tb_gen_code(cpu, pc, cs_base, cs_top, cheri_flags, flags, cflags);
+        tb = tb_gen_code(cpu, pc, cs_base, pcc_base, pcc_top, cheri_flags,
+                         flags, cflags);
         mmap_unlock();
         /* We add the TB in the virtual pc hash table for the fast lookup */
         qatomic_set(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)], tb);

@@ -1309,7 +1309,8 @@ static bool tb_cmp(const void *ap, const void *bp)
 
     return a->pc == b->pc &&
         a->cs_base == b->cs_base &&
-        a->cs_top == b->cs_top &&
+        a->pcc_base == b->pcc_base &&
+        a->pcc_top == b->pcc_top &&
         a->cheri_flags == b->cheri_flags &&
         a->flags == b->flags &&
         (tb_cflags(a) & ~CF_INVALID) == (tb_cflags(b) & ~CF_INVALID) &&
@@ -1844,8 +1845,9 @@ tb_link_page(TranslationBlock *tb, tb_page_addr_t phys_pc,
 
 /* Called with mmap_lock held for user mode emulation.  */
 TranslationBlock *tb_gen_code(CPUState *cpu, target_ulong pc,
-                              target_ulong cs_base, target_ulong cs_top,
-                              uint32_t cheri_flags, uint32_t flags, int cflags)
+                              target_ulong cs_base, target_ulong pcc_base,
+                              target_ulong pcc_top, uint32_t cheri_flags,
+                              uint32_t flags, int cflags)
 {
     CPUArchState *env = cpu->env_ptr;
     TranslationBlock *tb, *existing_tb;
@@ -1894,7 +1896,8 @@ TranslationBlock *tb_gen_code(CPUState *cpu, target_ulong pc,
     tb->tc.ptr = tcg_splitwx_to_rx(gen_code_buf);
     tb->pc = pc;
     tb->cs_base = cs_base;
-    tb->cs_top = cs_top;
+    tb->pcc_base = pcc_base;
+    tb->pcc_top = pcc_top;
     tb->cheri_flags = cheri_flags;
     tb->flags = flags;
     tb->cflags = cflags;
@@ -2134,7 +2137,8 @@ tb_invalidate_phys_page_range__locked(struct page_collection *pages,
     TranslationBlock *current_tb = NULL;
     target_ulong current_pc = 0;
     target_ulong current_cs_base = 0;
-    target_ulong current_cs_top = 0;
+    target_ulong current_pcc_base = 0;
+    target_ulong current_pcc_top = 0;
     uint32_t current_cheri_flags = 0;
     uint32_t current_flags = 0;
 #endif /* TARGET_HAS_PRECISE_SMC */
@@ -2180,9 +2184,9 @@ tb_invalidate_phys_page_range__locked(struct page_collection *pages,
                  */
                 current_tb_modified = true;
                 cpu_restore_state_from_tb(cpu, current_tb, retaddr, true);
-                cpu_get_tb_cpu_state_6(env, &current_pc, &current_cs_base,
-                                     &current_cs_top, &current_cheri_flags,
-                                     &current_flags);
+                cpu_get_tb_cpu_state_ext(env, &current_pc, &current_cs_base,
+                                         &current_pcc_base, &current_pcc_top,
+                                         &current_cheri_flags, &current_flags);
             }
 #endif /* TARGET_HAS_PRECISE_SMC */
             tb_phys_invalidate__locked(tb);
@@ -2325,8 +2329,8 @@ static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
     int current_tb_modified = 0;
     target_ulong current_pc = 0;
     target_ulong current_cs_base = 0;
-    target_ulong current_cs_top = 0;
-    target_ulong current_ds_base = 0;
+    target_ulong current_pcc_base = 0;
+    target_ulong current_pcc_top = 0;
     uint32_t current_cheri_flags = 0;
     uint32_t current_flags = 0;
 #endif
@@ -2360,9 +2364,9 @@ static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
 
             current_tb_modified = 1;
             cpu_restore_state_from_tb(cpu, current_tb, pc, true);
-            cpu_get_tb_cpu_state_6(env, &current_pc, &current_cs_base,
-                                 &current_cs_top, &current_cheri_flags,
-                                 &current_flags);
+            cpu_get_tb_cpu_state_ext(env, &current_pc, &current_cs_base,
+                                     &current_pcc_base, &current_pcc_top,
+                                     &current_cheri_flags, &current_flags);
         }
 #endif /* TARGET_HAS_PRECISE_SMC */
         tb_phys_invalidate(tb, addr);
@@ -2396,12 +2400,13 @@ void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr)
         /* The exception probably happened in a helper.  The CPU state should
            have been saved before calling it. Fetch the PC from there.  */
         CPUArchState *env = cpu->env_ptr;
-        target_ulong pc, cs_base, cs_top = 0;
+        target_ulong pc, cs_base, pcc_base = 0, pcc_top = 0;
         uint32_t cheri_flags = 0;
         tb_page_addr_t addr;
         uint32_t flags;
 
-        cpu_get_tb_cpu_state_6(env, &pc, &cs_base, &cs_top, &cheri_flags, &flags);
+        cpu_get_tb_cpu_state_ext(env, &pc, &cs_base, &pcc_base, &pcc_top,
+                                 &cheri_flags, &flags);
         addr = get_page_addr_code(env, pc);
         if (addr != -1) {
             tb_invalidate_phys_range(addr, addr + 1);

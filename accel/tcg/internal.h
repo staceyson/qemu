@@ -12,8 +12,9 @@
 #include "exec/exec-all.h"
 
 TranslationBlock *tb_gen_code(CPUState *cpu, target_ulong pc,
-                              target_ulong cs_base, target_ulong cs_top,
-                              uint32_t cheri_flags, uint32_t flags, int cflags);
+                              target_ulong cs_base, target_ulong pcc_base,
+                              target_ulong pcc_top, uint32_t cheri_flags,
+                              uint32_t flags, int cflags);
 
 void QEMU_NORETURN cpu_io_recompile(CPUState *cpu, uintptr_t retaddr);
 
