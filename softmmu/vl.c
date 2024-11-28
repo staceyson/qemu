@@ -3475,7 +3475,7 @@ void qemu_init(int argc, char **argv, char **envp)
                     qemu_log_instr_set_backend(QEMU_LOG_INSTR_BACKEND_JSON);
 #endif
                 } else {
-                    printf("Invalid choice for cheri-trace-format: '%s'\n", optarg);
+                    printf("Invalid choice for cheri-trace-backend: '%s'\n", optarg);
                     exit(1);
                 }
                 break;
