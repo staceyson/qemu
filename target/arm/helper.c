@@ -14033,9 +14033,9 @@ void aarch64_sve_change_el(CPUARMState *env, int old_el,
 #endif
 
 #ifdef CONFIG_TCG_LOG_INSTR
-#ifdef TARGET_CHERI
 
-void HELPER(arm_log_instr)(CPUARMState *env, target_ulong pc, uint32_t opcode)
+void HELPER(arm_log_instr)(CPUARMState *env, uint64_t pc, uint32_t opcode,
+                           uint32_t opcode_size)
 {
     if (qemu_log_instr_enabled(env)) {
         qemu_log_instr_asid(env, cpu_get_asid(env, pc));
@@ -14048,7 +14048,6 @@ void HELPER(arm_log_instr)(CPUARMState *env, target_ulong pc, uint32_t opcode)
         }
     }
 }
-#endif
 
 bool cpu_log_instr_event_regdump(CPUARMState *env, log_event_t *event)
 {
