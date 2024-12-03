@@ -73,7 +73,7 @@ def addBootJobs(bootJobs, params, String qemuConfig, String architecture, String
 
 def bootCheriBSDForAllArchitectures(params, String qemuConfig, boolean isDebug) {
     stage("Boot CheriBSD (${qemuConfig})") {
-        bootJobs = [failFast: false]
+        def bootJobs = [failFast: false]
         ["riscv64", "riscv64-purecap", "aarch64", "morello-purecap"].each { String architecture ->
             addBootJobs(bootJobs, params, qemuConfig, architecture, "main")
             if (!isDebug) {
