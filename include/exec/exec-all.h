@@ -541,7 +541,14 @@ static inline uint32_t tb_cflags(const TranslationBlock *tb)
 /* current cflags for hashing/comparison */
 static inline uint32_t curr_cflags(CPUState *cpu)
 {
-    return cpu->tcg_cflags;
+    uint32_t cflags = cpu->tcg_cflags;
+
+#ifdef CONFIG_TCG_LOG_INSTR
+    if (cpu->log_state.loglevel_active && qemu_loglevel_mask(CPU_LOG_INSTR)) {
+        cflags |= CF_LOG_INSTR;
+    }
+#endif
+    return cflags;
 }
 
 /* TranslationBlock invalidate API */

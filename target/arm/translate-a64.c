@@ -2697,7 +2697,32 @@ static void disas_exc(DisasContext *s, uint32_t insn)
 #endif
             gen_exception_internal_insn(s, s->pc_curr, EXCP_SEMIHOST);
         } else {
+#ifdef CONFIG_TCG_LOG_INSTR
+            TCGv tpc = tcg_const_tl(s->base.pc_next);
+            switch (imm16) {
+            case 0xff00:
+                gen_helper_qemu_log_instr_start(cpu_env, tpc);
+                s->base.is_jmp = DISAS_EXIT;
+                break;
+            case 0xff01:
+                gen_helper_qemu_log_instr_stop(cpu_env, tpc);
+                s->base.is_jmp = DISAS_EXIT;
+                break;
+            case 0xff02:
+                gen_helper_qemu_log_instr_user_start(cpu_env, tpc);
+                s->base.is_jmp = DISAS_EXIT;
+                break;
+            default:
+                unsupported_encoding(s, insn);
+            }
+            tcg_temp_free(tpc);
+
+            if (s->base.is_jmp != DISAS_NEXT) {
+                gen_a64_set_pc_im(s->base.pc_next);
+            }
+#else
             unsupported_encoding(s, insn);
+#endif
         }
         break;
     case 5:
