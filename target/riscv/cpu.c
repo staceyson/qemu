@@ -286,7 +286,10 @@ static void riscv_cpu_dump_state(CPUState *cs, FILE *f, int flags)
         qemu_fprintf(f, " %s %d\n", "V      =  ", riscv_cpu_virt_enabled(env));
     }
 #endif
-    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "pc      ", PC_ADDR(env));
+    // FIXME: will this be the right pc or start of TB?
+    // Correct fix would be to implement tcg_cpu_synchronize_state()
+    target_ulong pc_addr = cpu_get_current_pc(env, 0, 0);
+    qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "pc      ", pc_addr);
 #ifdef TARGET_CHERI
     qemu_fprintf(f, " %s " TARGET_FMT_lx "\n", "pc (offset) ", GET_SPECIAL_REG_ARCH(env, pc, pcc));
 #endif

@@ -26646,10 +26646,13 @@ void mips_cpu_dump_state(CPUState *cs, FILE *f, int flags)
     CPUMIPSState *env = &cpu->env;
     int i;
 
+    // FIXME: will this be the right pc or start of TB?
+    // Correct fix would be to implement tcg_cpu_synchronize_state()
+    target_ulong pc_addr = cpu_get_current_pc(env, 0, 0);
     qemu_fprintf(f, "pc=0x" TARGET_FMT_lx " HI=0x" TARGET_FMT_lx
                  " LO=0x" TARGET_FMT_lx " ds %04x "
                  TARGET_FMT_lx " " TARGET_FMT_ld "\n",
-                 PC_ADDR(env), env->active_tc.HI[0], env->active_tc.LO[0],
+                 pc_addr, env->active_tc.HI[0], env->active_tc.LO[0],
                  env->hflags, env->btarget, env->bcond);
     for (i = 0; i < 32; i++) {
         if ((i & 3) == 0) {
