@@ -1033,7 +1033,6 @@ out:
     LOG_DISAS("mtc2 %s (reg %d sel %d)\n", rn, reg, sel);
     /* For simplicity assume that all writes can cause interrupts.  */
     if (ctx->base.tb->cflags & CF_USE_ICOUNT) {
-        gen_io_end();
         ctx->base.is_jmp = DISAS_EXIT;
     }
     return;
