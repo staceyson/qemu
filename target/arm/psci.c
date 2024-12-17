@@ -52,7 +52,7 @@ bool arm_is_psci_call(ARMCPU *cpu, int excp_type)
         return false;
     }
 
-    switch (param) {
+    switch (param & QEMU_SMCCC_FN_ID_MASK) {
     case QEMU_PSCI_0_2_FN_PSCI_VERSION:
     case QEMU_PSCI_0_2_FN_MIGRATE_INFO_TYPE:
     case QEMU_PSCI_0_2_FN_AFFINITY_INFO:
@@ -69,6 +69,10 @@ bool arm_is_psci_call(ARMCPU *cpu, int excp_type)
     case QEMU_PSCI_0_2_FN64_CPU_SUSPEND:
     case QEMU_PSCI_0_1_FN_MIGRATE:
     case QEMU_PSCI_0_2_FN_MIGRATE:
+    /*
+     * Allow for DEN0115A PCI_Config_Access 1.0 probing
+     */
+    case QEMU_SMCCC_PCI_CONFIG_FN_VERSION:
         return true;
     default:
         return false;
@@ -90,6 +94,7 @@ void arm_handle_psci_call(ARMCPU *cpu)
     uint64_t context_id, mpidr;
     target_ulong entry;
     int32_t ret = 0;
+    uint32_t psci_fn;
     int i;
 
     for (i = 0; i < 4; i++) {
@@ -100,13 +105,19 @@ void arm_handle_psci_call(ARMCPU *cpu)
          */
         param[i] = is_a64(env) ? arm_get_xreg(env, i) : env->regs[i];
     }
+    /*
+     * XXX-AM:
+     * DEN0028D mandates that implementation ignore the top 32bits from
+     * FN identifiers.
+     */
+    psci_fn = param[0] & QEMU_SMCCC_FN_ID_MASK;
 
-    if ((param[0] & QEMU_PSCI_0_2_64BIT) && !is_a64(env)) {
+    if ((psci_fn & QEMU_PSCI_0_2_64BIT) && !is_a64(env)) {
         ret = QEMU_PSCI_RET_INVALID_PARAMS;
         goto err;
     }
 
-    switch (param[0]) {
+    switch (psci_fn) {
         CPUState *target_cpu_state;
         ARMCPU *target_cpu;
 
@@ -194,6 +205,9 @@ void arm_handle_psci_call(ARMCPU *cpu)
         break;
     case QEMU_PSCI_0_1_FN_MIGRATE:
     case QEMU_PSCI_0_2_FN_MIGRATE:
+        ret = QEMU_PSCI_RET_NOT_SUPPORTED;
+        break;
+    case QEMU_SMCCC_PCI_CONFIG_FN_VERSION:
         ret = QEMU_PSCI_RET_NOT_SUPPORTED;
         break;
     default:
