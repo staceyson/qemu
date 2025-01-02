@@ -76,7 +76,6 @@ static bool check_fields_match(const typename Handler::cap_t& result, const test
 }
 
 template <class Handler, typename test_input> static bool test_one_entry(const test_input& ti) {
-    // decompress_representable(ti.input.pesbt, ti.input.cursor);
     // The inputs already have the NULL xor mask removed -> Handler::decompress_raw()
     typename Handler::cap_t result = Handler::decompress_raw(ti.pesbt, ti.cursor, false);
     CAPTURE(ti.pesbt, ti.cursor);

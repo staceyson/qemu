@@ -8,7 +8,7 @@
 #ifndef MIPS_INTERNAL_H
 #define MIPS_INTERNAL_H
 
-#include "fpu/softfloat-helpers.h"
+#include "exec/memattrs.h"
 #include "qemu/log.h"
 #include "exec/log_instr.h"
 
@@ -17,10 +17,11 @@
  * CP0C0_MT field.
  */
 enum mips_mmu_types {
-    MMU_TYPE_NONE,
-    MMU_TYPE_R4000,
-    MMU_TYPE_RESERVED,
-    MMU_TYPE_FMT,
+    MMU_TYPE_NONE       = 0,
+    MMU_TYPE_R4000      = 1,    /* Standard TLB */
+    MMU_TYPE_BAT        = 2,    /* Block Address Translation */
+    MMU_TYPE_FMT        = 3,    /* Fixed Mapping */
+    MMU_TYPE_DVF        = 4,    /* Dual VTLB and FTLB */
     MMU_TYPE_R3000,
     MMU_TYPE_R6000,
     MMU_TYPE_R8000
@@ -74,13 +75,6 @@ struct mips_def_t {
 
 extern const struct mips_def_t mips_defs[];
 extern const int mips_defs_number;
-
-enum CPUMIPSMSADataFormat {
-    DF_BYTE = 0,
-    DF_HALF,
-    DF_WORD,
-    DF_DOUBLE
-};
 
 #ifdef TARGET_CHERI
 #include "cheri_utils.h"
@@ -137,7 +131,7 @@ struct CPUMIPSTLBContext {
     uint32_t nb_tlb;
     uint32_t tlb_in_use;
     int (*map_address)(struct CPUMIPSState *env, hwaddr *physical, int *prot,
-                       target_ulong address, int rw, int access_type);
+                       target_ulong address, MMUAccessType access_type);
     void (*helper_tlbwi)(struct CPUMIPSState *env, uintptr_t retpc);
     void (*helper_tlbwr)(struct CPUMIPSState *env, uintptr_t retpc);
     void (*helper_tlbp)(struct CPUMIPSState *env);
@@ -152,11 +146,11 @@ struct CPUMIPSTLBContext {
 };
 
 int no_mmu_map_address(CPUMIPSState *env, hwaddr *physical, int *prot,
-                       target_ulong address, int rw, int access_type);
+                       target_ulong address, MMUAccessType access_type);
 int fixed_mmu_map_address(CPUMIPSState *env, hwaddr *physical, int *prot,
-                          target_ulong address, int rw, int access_type);
+                          target_ulong address, MMUAccessType access_type);
 int r4k_map_address(CPUMIPSState *env, hwaddr *physical, int *prot,
-                    target_ulong address, int rw, int access_type);
+                    target_ulong address, MMUAccessType access_type);
 void r4k_helper_tlbwi(CPUMIPSState *env, uintptr_t retpc);
 void r4k_helper_tlbwr(CPUMIPSState *env, uintptr_t retpc);
 void r4k_helper_tlbp(CPUMIPSState *env);
@@ -173,7 +167,7 @@ void mips_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
                                     int mmu_idx, MemTxAttrs attrs,
                                     MemTxResult response, uintptr_t retaddr);
 hwaddr cpu_mips_translate_address(CPUMIPSState *env, target_ulong address,
-                                  int rw);
+                                  MMUAccessType access_type);
 #endif
 
 #define cpu_signal_handler cpu_mips_signal_handler
@@ -226,9 +220,7 @@ static inline bool cpu_mips_hw_interrupts_pending(CPUMIPSState *env)
 
 void mips_tcg_init(void);
 
-/* TODO QOM'ify CPU reset and remove */
-void cpu_state_reset(CPUMIPSState *s);
-void cpu_mips_realize_env(CPUMIPSState *env);
+void msa_reset(CPUMIPSState *env);
 
 /* cp0_timer.c */
 uint32_t cpu_mips_get_count(CPUMIPSState *env);
@@ -241,52 +233,13 @@ uint64_t cpu_mips_get_rtc64 (CPUMIPSState *env);
 void cpu_mips_set_rtc64 (CPUMIPSState *env, uint64_t value);
 
 /* helper.c */
+void mmu_init(CPUMIPSState *env, const mips_def_t *def);
 bool mips_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                        MMUAccessType access_type, int mmu_idx,
                        bool probe, uintptr_t retaddr);
 
 /* op_helper.c */
-uint32_t float_class_s(uint32_t arg, float_status *fst);
-uint64_t float_class_d(uint64_t arg, float_status *fst);
-
-extern unsigned int ieee_rm[];
 void update_pagemask(CPUMIPSState *env, target_ulong arg1, int32_t *pagemask);
-
-static inline void restore_rounding_mode(CPUMIPSState *env)
-{
-    set_float_rounding_mode(ieee_rm[env->active_fpu.fcr31 & 3],
-                            &env->active_fpu.fp_status);
-}
-
-static inline void restore_flush_mode(CPUMIPSState *env)
-{
-    set_flush_to_zero((env->active_fpu.fcr31 & (1 << FCR31_FS)) != 0,
-                      &env->active_fpu.fp_status);
-}
-
-static inline void restore_snan_bit_mode(CPUMIPSState *env)
-{
-    set_snan_bit_is_one((env->active_fpu.fcr31 & (1 << FCR31_NAN2008)) == 0,
-                        &env->active_fpu.fp_status);
-}
-
-static inline void restore_fp_status(CPUMIPSState *env)
-{
-    restore_rounding_mode(env);
-    restore_flush_mode(env);
-    restore_snan_bit_mode(env);
-}
-
-static inline void restore_msa_fp_status(CPUMIPSState *env)
-{
-    float_status *status = &env->active_tc.msa_fp_status;
-    int rounding_mode = (env->active_tc.msacsr & MSACSR_RM_MASK) >> MSACSR_RM;
-    bool flush_to_zero = (env->active_tc.msacsr & MSACSR_FS_MASK) != 0;
-
-    set_float_rounding_mode(ieee_rm[rounding_mode], status);
-    set_flush_to_zero(flush_to_zero, status);
-    set_flush_inputs_to_zero(flush_to_zero, status);
-}
 
 static inline void restore_pamask(CPUMIPSState *env)
 {
@@ -354,7 +307,7 @@ static inline bool cheri_have_access_sysregs(CPUArchState *env);
 
 static inline bool can_access_cp0(CPUMIPSState* env) {
     if (((env->CP0_Status & (1 << CP0St_CU0)) &&
-        !(env->insn_flags & ISA_MIPS32R6)) ||
+        !(env->insn_flags & ISA_MIPS_R6)) ||
         !(env->hflags & MIPS_HFLAG_KSU)) {
 #ifdef TARGET_CHERI
         // For CHERI we need to check PCC.perms before enabling access to cp0 features.
@@ -418,7 +371,7 @@ static inline void compute_hflags(CPUMIPSState *env)
     } else if (((env->hflags & MIPS_HFLAG_KSU) == MIPS_HFLAG_UM) &&
                !(env->CP0_Status & (1 << CP0St_UX))) {
         env->hflags |= MIPS_HFLAG_AWRAP;
-    } else if (env->insn_flags & ISA_MIPS64R6) {
+    } else if (env->insn_flags & ISA_MIPS_R6) {
         /* Address wrapping for Supervisor and Kernel is specified in R6 */
         if ((((env->hflags & MIPS_HFLAG_KSU) == MIPS_HFLAG_SM) &&
              !(env->CP0_Status & (1 << CP0St_SX))) ||
@@ -474,7 +427,7 @@ static inline void compute_hflags(CPUMIPSState *env)
         }
 
     }
-    if (env->insn_flags & ISA_MIPS32R2) {
+    if (env->insn_flags & ISA_MIPS_R2) {
 #ifdef TARGET_CHERI
         /* COP1X enables CP1X instructions such as MADD.S, and is
            orthogonal to whether the FPU is in 64-bit mode. In MIPS32,
@@ -487,7 +440,7 @@ static inline void compute_hflags(CPUMIPSState *env)
             env->hflags |= MIPS_HFLAG_COP1X;
         }
 #endif /* ! TARGET_CHERI */
-    } else if (env->insn_flags & ISA_MIPS32) {
+    } else if (env->insn_flags & ISA_MIPS_R1) {
         if (env->hflags & MIPS_HFLAG_64) {
             env->hflags |= MIPS_HFLAG_COP1X;
         }
@@ -502,7 +455,7 @@ static inline void compute_hflags(CPUMIPSState *env)
             env->hflags |= MIPS_HFLAG_COP1X;
         }
     }
-    if (env->insn_flags & ASE_MSA) {
+    if (ase_msa_available(env)) {
         if (env->CP0_Config5 & (1 << CP0C5_MSAEn)) {
             env->hflags |= MIPS_HFLAG_MSA;
         }
@@ -523,6 +476,8 @@ void cpu_mips_tlb_flush(CPUMIPSState *env);
 void sync_c0_status(CPUMIPSState *env, CPUMIPSState *cpu, int tc);
 void cpu_mips_store_status(CPUMIPSState *env, target_ulong val);
 void cpu_mips_store_cause(CPUMIPSState *env, target_ulong val);
+
+const char *mips_exception_name(int32_t exception);
 
 void QEMU_NORETURN do_raise_exception_err(CPUMIPSState *env, MipsExcp exception,
                                           int error_code, uintptr_t pc);
@@ -606,10 +561,11 @@ void r4k_dump_tlb(CPUMIPSState *env, int idx);
 #endif
 void do_hexdump(GString *strbuf, uint8_t* buffer, target_ulong length,
                 target_ulong vaddr);
-hwaddr do_translate_address(CPUMIPSState *env, target_ulong address, int rw,
-                            uintptr_t retaddr);
-#endif
+hwaddr do_translate_address(CPUMIPSState *env, target_ulong address,
+                            MMUAccessType access_type, uintptr_t retaddr);
 
 #ifdef TARGET_CHERI
 #include "cheri-helper-utils.h"
+#endif
+
 #endif

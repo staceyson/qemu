@@ -685,7 +685,7 @@ static inline target_ulong get_cscc_addr(CPUArchState *env, uint32_t cs, uint32_
 
 target_ulong CHERI_HELPER_IMPL(cscc_without_tcg(CPUArchState *env, uint32_t cs, uint32_t cb))
 {
-    target_ulong retpc = GETPC();
+    uintptr_t retpc = GETPC();
     target_ulong vaddr = get_cscc_addr(env, cs, cb, retpc);
 
     qemu_maybe_log_instr_extra(env, "cscc: addr=" TARGET_FMT_plx

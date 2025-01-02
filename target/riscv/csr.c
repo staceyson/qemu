@@ -27,14 +27,6 @@
 #include "cheri-helper-utils.h"
 #endif
 
-/* CSR function table */
-static riscv_csr_operations csr_ops[];
-
-/* CSR function table constants */
-enum {
-    CSR_TABLE_SIZE = 0x1000
-};
-
 /* CSR update logging API */
 #if CONFIG_TCG_LOG_INSTR
 void riscv_log_instr_csr_changed(CPURISCVState *env, int csrno)
@@ -85,7 +77,7 @@ static int vs(CPURISCVState *env, int csrno)
     if (env->misa & RVV) {
         return 0;
     }
-    return -1;
+    return -RISCV_EXCP_ILLEGAL_INST;
 }
 
 static int ctr(CPURISCVState *env, int csrno)
@@ -125,42 +117,63 @@ static int ctr(CPURISCVState *env, int csrno)
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
-#if defined(TARGET_RISCV32)
-        case CSR_CYCLEH:
-            if (!get_field(env->hcounteren, HCOUNTEREN_CY) &&
-                get_field(env->mcounteren, HCOUNTEREN_CY)) {
-                return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
+        }
+        if (riscv_cpu_is_32bit(env)) {
+            switch (csrno) {
+            case CSR_CYCLEH:
+                if (!get_field(env->hcounteren, HCOUNTEREN_CY) &&
+                    get_field(env->mcounteren, HCOUNTEREN_CY)) {
+                    return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
+                }
+                break;
+            case CSR_TIMEH:
+                if (!get_field(env->hcounteren, HCOUNTEREN_TM) &&
+                    get_field(env->mcounteren, HCOUNTEREN_TM)) {
+                    return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
+                }
+                break;
+            case CSR_INSTRETH:
+                if (!get_field(env->hcounteren, HCOUNTEREN_IR) &&
+                    get_field(env->mcounteren, HCOUNTEREN_IR)) {
+                    return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
+                }
+                break;
+            case CSR_HPMCOUNTER3H...CSR_HPMCOUNTER31H:
+                if (!get_field(env->hcounteren, 1 << (csrno - CSR_HPMCOUNTER3H)) &&
+                    get_field(env->mcounteren, 1 << (csrno - CSR_HPMCOUNTER3H))) {
+                    return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
+                }
+                break;
             }
-            break;
-        case CSR_TIMEH:
-            if (!get_field(env->hcounteren, HCOUNTEREN_TM) &&
-                get_field(env->mcounteren, HCOUNTEREN_TM)) {
-                return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
-            }
-            break;
-        case CSR_INSTRETH:
-            if (!get_field(env->hcounteren, HCOUNTEREN_IR) &&
-                get_field(env->mcounteren, HCOUNTEREN_IR)) {
-                return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
-            }
-            break;
-        case CSR_HPMCOUNTER3H...CSR_HPMCOUNTER31H:
-            if (!get_field(env->hcounteren, 1 << (csrno - CSR_HPMCOUNTER3H)) &&
-                get_field(env->mcounteren, 1 << (csrno - CSR_HPMCOUNTER3H))) {
-                return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
-            }
-            break;
-#endif
         }
     }
 #endif
     return 0;
 }
 
+static int ctr32(CPURISCVState *env, int csrno)
+{
+    if (!riscv_cpu_is_32bit(env)) {
+        return -RISCV_EXCP_ILLEGAL_INST;
+    }
+
+    return ctr(env, csrno);
+}
+
 #if !defined(CONFIG_USER_ONLY)
 static int any(CPURISCVState *env, int csrno)
 {
     return 0;
+}
+
+static int any32(CPURISCVState *env, int csrno)
+{
+    if (!riscv_cpu_is_32bit(env)) {
+        return -RISCV_EXCP_ILLEGAL_INST;
+    }
+
+    return any(env, csrno);
+
 }
 
 #ifdef TARGET_CHERI
@@ -189,6 +202,16 @@ static int hmode(CPURISCVState *env, int csrno)
     }
 
     return -RISCV_EXCP_ILLEGAL_INST;
+}
+
+static int hmode32(CPURISCVState *env, int csrno)
+{
+    if (!riscv_cpu_is_32bit(env)) {
+        return 0;
+    }
+
+    return hmode(env, csrno);
+
 }
 
 static int pmp(CPURISCVState *env, int csrno)
@@ -340,7 +363,6 @@ static int read_instret(CPURISCVState *env, int csrno, target_ulong *val)
     return 0;
 }
 
-#if defined(TARGET_RISCV32)
 static int read_instreth(CPURISCVState *env, int csrno, target_ulong *val)
 {
 #if !defined(CONFIG_USER_ONLY)
@@ -354,7 +376,6 @@ static int read_instreth(CPURISCVState *env, int csrno, target_ulong *val)
 #endif
     return 0;
 }
-#endif /* TARGET_RISCV32 */
 
 #if defined(CONFIG_USER_ONLY)
 static int read_time(CPURISCVState *env, int csrno, target_ulong *val)
@@ -363,13 +384,11 @@ static int read_time(CPURISCVState *env, int csrno, target_ulong *val)
     return 0;
 }
 
-#if defined(TARGET_RISCV32)
 static int read_timeh(CPURISCVState *env, int csrno, target_ulong *val)
 {
     *val = cpu_get_host_ticks() >> 32;
     return 0;
 }
-#endif
 
 #else /* CONFIG_USER_ONLY */
 
@@ -385,7 +404,6 @@ static int read_time(CPURISCVState *env, int csrno, target_ulong *val)
     return 0;
 }
 
-#if defined(TARGET_RISCV32)
 static int read_timeh(CPURISCVState *env, int csrno, target_ulong *val)
 {
     uint64_t delta = riscv_cpu_virt_enabled(env) ? env->htimedelta : 0;
@@ -397,7 +415,6 @@ static int read_timeh(CPURISCVState *env, int csrno, target_ulong *val)
     *val = (env->rdtime_fn(env->rdtime_fn_arg) + delta) >> 32;
     return 0;
 }
-#endif
 
 /* Machine constants */
 
@@ -445,22 +462,21 @@ static const target_ulong sstatus_v1_10_mask = SSTATUS_SIE | SSTATUS_SPIE |
 #endif
     SSTATUS_SD;
 static const target_ulong sip_writable_mask = SIP_SSIP | MIP_USIP | MIP_UEIP;
-static const target_ulong hip_writable_mask = MIP_VSSIP | MIP_VSTIP | MIP_VSEIP;
+static const target_ulong hip_writable_mask = MIP_VSSIP;
+static const target_ulong hvip_writable_mask = MIP_VSSIP | MIP_VSTIP | MIP_VSEIP;
 static const target_ulong vsip_writable_mask = MIP_VSSIP;
 
-#if defined(TARGET_RISCV32)
-static const char valid_vm_1_10[16] = {
+static const char valid_vm_1_10_32[16] = {
     [VM_1_10_MBARE] = 1,
     [VM_1_10_SV32] = 1
 };
-#elif defined(TARGET_RISCV64)
-static const char valid_vm_1_10[16] = {
+
+static const char valid_vm_1_10_64[16] = {
     [VM_1_10_MBARE] = 1,
     [VM_1_10_SV39] = 1,
     [VM_1_10_SV48] = 1,
     [VM_1_10_SV57] = 1
 };
-#endif /* CONFIG_USER_ONLY */
 
 /* Machine Information Registers */
 static int read_zero(CPURISCVState *env, int csrno, target_ulong *val)
@@ -483,7 +499,11 @@ static int read_mstatus(CPURISCVState *env, int csrno, target_ulong *val)
 
 static int validate_vm(CPURISCVState *env, target_ulong vm)
 {
-    return valid_vm_1_10[vm & 0xf];
+    if (riscv_cpu_is_32bit(env)) {
+        return valid_vm_1_10_32[vm & 0xf];
+    } else {
+        return valid_vm_1_10_64[vm & 0xf];
+    }
 }
 
 static int write_mstatus(CPURISCVState *env, int csrno, target_ulong val)
@@ -501,15 +521,16 @@ static int write_mstatus(CPURISCVState *env, int csrno, target_ulong val)
         MSTATUS_SPP | MSTATUS_FS | MSTATUS_MPRV | MSTATUS_SUM |
         MSTATUS_MPP | MSTATUS_MXR | MSTATUS_TVM | MSTATUS_TSR |
         MSTATUS_TW;
-#if defined(TARGET_RISCV64)
-    /*
-     * RV32: MPV and GVA are not in mstatus. The current plan is to
-     * add them to mstatush. For now, we just don't support it.
-     */
-    if (riscv_has_ext(env, RVH)) {
-    mask |= MSTATUS_MPV | MSTATUS_GVA;
+
+    if (!riscv_cpu_is_32bit(env)) {
+        /*
+         * RV32: MPV and GVA are not in mstatus. The current plan is to
+         * add them to mstatush. For now, we just don't support it.
+         */
+        if (riscv_has_ext(env, RVH)) {
+            mask |= MSTATUS_MPV | MSTATUS_GVA;
+        }
     }
-#endif
 
     mstatus = (mstatus & ~mask) | (val & mask);
 
@@ -521,7 +542,6 @@ static int write_mstatus(CPURISCVState *env, int csrno, target_ulong val)
     return 0;
 }
 
-#ifdef TARGET_RISCV32
 static int read_mstatush(CPURISCVState *env, int csrno, target_ulong *val)
 {
     *val = env->mstatus >> 32;
@@ -541,7 +561,6 @@ static int write_mstatush(CPURISCVState *env, int csrno, target_ulong val)
 
     return 0;
 }
-#endif
 
 static int read_misa(CPURISCVState *env, int csrno, target_ulong *val)
 {
@@ -790,30 +809,42 @@ static int write_sstatus(CPURISCVState *env, int csrno, target_ulong val)
     return write_mstatus(env, CSR_MSTATUS, newval);
 }
 
+static int read_vsie(CPURISCVState *env, int csrno, target_ulong *val)
+{
+    /* Shift the VS bits to their S bit location in vsie */
+    *val = (env->mie & env->hideleg & VS_MODE_INTERRUPTS) >> 1;
+    return 0;
+}
+
 static int read_sie(CPURISCVState *env, int csrno, target_ulong *val)
 {
     if (riscv_cpu_virt_enabled(env)) {
-        /* Tell the guest the VS bits, shifted to the S bit locations */
-        *val = (env->mie & env->mideleg & VS_MODE_INTERRUPTS) >> 1;
+        read_vsie(env, CSR_VSIE, val);
     } else {
         *val = env->mie & env->mideleg;
     }
     return 0;
 }
 
+static int write_vsie(CPURISCVState *env, int csrno, target_ulong val)
+{
+    /* Shift the S bits to their VS bit location in mie */
+    target_ulong newval = (env->mie & ~VS_MODE_INTERRUPTS) |
+                          ((val << 1) & env->hideleg & VS_MODE_INTERRUPTS);
+    return write_mie(env, CSR_MIE, newval);
+}
+
 static int write_sie(CPURISCVState *env, int csrno, target_ulong val)
 {
-    target_ulong newval;
-
     if (riscv_cpu_virt_enabled(env)) {
-        /* Shift the guests S bits to VS */
-        newval = (env->mie & ~VS_MODE_INTERRUPTS) |
-                 ((val << 1) & VS_MODE_INTERRUPTS);
+        write_vsie(env, CSR_VSIE, val);
     } else {
-        newval = (env->mie & ~S_MODE_INTERRUPTS) | (val & S_MODE_INTERRUPTS);
+        target_ulong newval = (env->mie & ~S_MODE_INTERRUPTS) |
+                              (val & S_MODE_INTERRUPTS);
+        write_mie(env, CSR_MIE, newval);
     }
 
-    return write_mie(env, CSR_MIE, newval);
+    return 0;
 }
 
 static int read_stvec(CPURISCVState *env, int csrno, target_ulong *val)
@@ -898,17 +929,25 @@ static int write_sbadaddr(CPURISCVState *env, int csrno, target_ulong val)
     return 0;
 }
 
+static int rmw_vsip(CPURISCVState *env, int csrno, target_ulong *ret_value,
+                    target_ulong new_value, target_ulong write_mask)
+{
+    /* Shift the S bits to their VS bit location in mip */
+    int ret = rmw_mip(env, 0, ret_value, new_value << 1,
+                      (write_mask << 1) & vsip_writable_mask & env->hideleg);
+    *ret_value &= VS_MODE_INTERRUPTS;
+    /* Shift the VS bits to their S bit location in vsip */
+    *ret_value >>= 1;
+    return ret;
+}
+
 static int rmw_sip(CPURISCVState *env, int csrno, target_ulong *ret_value,
                    target_ulong new_value, target_ulong write_mask)
 {
     int ret;
 
     if (riscv_cpu_virt_enabled(env)) {
-        /* Shift the new values to line up with the VS bits */
-        ret = rmw_mip(env, CSR_MSTATUS, ret_value, new_value << 1,
-                      (write_mask & sip_writable_mask) << 1 & env->mideleg);
-        ret &= vsip_writable_mask;
-        ret >>= 1;
+        ret = rmw_vsip(env, CSR_VSIP, ret_value, new_value, write_mask);
     } else {
         ret = rmw_mip(env, CSR_MSTATUS, ret_value, new_value,
                       write_mask & env->mideleg & sip_writable_mask);
@@ -959,10 +998,10 @@ static int write_satp(CPURISCVState *env, int csrno, target_ulong val)
 static int read_hstatus(CPURISCVState *env, int csrno, target_ulong *val)
 {
     *val = env->hstatus;
-#ifdef TARGET_RISCV64
-    /* We only support 64-bit VSXL */
-    *val = set_field(*val, HSTATUS_VSXL, 2);
-#endif
+    if (!riscv_cpu_is_32bit(env)) {
+        /* We only support 64-bit VSXL */
+        *val = set_field(*val, HSTATUS_VSXL, 2);
+    }
     /* We only support little endian */
     *val = set_field(*val, HSTATUS_VSBE, 0);
     return 0;
@@ -971,11 +1010,9 @@ static int read_hstatus(CPURISCVState *env, int csrno, target_ulong *val)
 static int write_hstatus(CPURISCVState *env, int csrno, target_ulong val)
 {
     env->hstatus = val;
-#ifdef TARGET_RISCV64
-    if (get_field(val, HSTATUS_VSXL) != 2) {
+    if (!riscv_cpu_is_32bit(env) && get_field(val, HSTATUS_VSXL) != 2) {
         qemu_log_mask(LOG_UNIMP, "QEMU does not support mixed HSXLEN options.");
     }
-#endif
     if (get_field(val, HSTATUS_VSBE) != 0) {
         qemu_log_mask(LOG_UNIMP, "QEMU does not support big endian guests.");
     }
@@ -1010,9 +1047,9 @@ static int rmw_hvip(CPURISCVState *env, int csrno, target_ulong *ret_value,
                    target_ulong new_value, target_ulong write_mask)
 {
     int ret = rmw_mip(env, 0, ret_value, new_value,
-                      write_mask & hip_writable_mask);
+                      write_mask & hvip_writable_mask);
 
-    *ret_value &= hip_writable_mask;
+    *ret_value &= hvip_writable_mask;
 
     return ret;
 }
@@ -1117,11 +1154,7 @@ static int read_htimedelta(CPURISCVState *env, int csrno, target_ulong *val)
         return -RISCV_EXCP_ILLEGAL_INST;
     }
 
-#if defined(TARGET_RISCV32)
-    *val = env->htimedelta & 0xffffffff;
-#else
     *val = env->htimedelta;
-#endif
     return 0;
 }
 
@@ -1131,15 +1164,14 @@ static int write_htimedelta(CPURISCVState *env, int csrno, target_ulong val)
         return -RISCV_EXCP_ILLEGAL_INST;
     }
 
-#if defined(TARGET_RISCV32)
-    env->htimedelta = deposit64(env->htimedelta, 0, 32, (uint64_t)val);
-#else
-    env->htimedelta = val;
-#endif
+    if (riscv_cpu_is_32bit(env)) {
+        env->htimedelta = deposit64(env->htimedelta, 0, 32, (uint64_t)val);
+    } else {
+        env->htimedelta = val;
+    }
     return 0;
 }
 
-#if defined(TARGET_RISCV32)
 static int read_htimedeltah(CPURISCVState *env, int csrno, target_ulong *val)
 {
     if (!env->rdtime_fn) {
@@ -1159,7 +1191,6 @@ static int write_htimedeltah(CPURISCVState *env, int csrno, target_ulong val)
     env->htimedelta = deposit64(env->htimedelta, 32, 32, (uint64_t)val);
     return 0;
 }
-#endif
 
 /* Virtual CSR Registers */
 static int read_vsstatus(CPURISCVState *env, int csrno, target_ulong *val)
@@ -1173,26 +1204,6 @@ static int write_vsstatus(CPURISCVState *env, int csrno, target_ulong val)
     uint64_t mask = (target_ulong)-1;
     env->vsstatus = (env->vsstatus & ~mask) | (uint64_t)val;
     return 0;
-}
-
-static int rmw_vsip(CPURISCVState *env, int csrno, target_ulong *ret_value,
-                    target_ulong new_value, target_ulong write_mask)
-{
-    int ret = rmw_mip(env, 0, ret_value, new_value,
-                      write_mask & env->mideleg & vsip_writable_mask);
-    return ret;
-}
-
-static int read_vsie(CPURISCVState *env, int csrno, target_ulong *val)
-{
-    *val = env->mie & env->mideleg & VS_MODE_INTERRUPTS;
-    return 0;
-}
-
-static int write_vsie(CPURISCVState *env, int csrno, target_ulong val)
-{
-    target_ulong newval = (env->mie & ~env->mideleg) | (val & env->mideleg & MIP_VSSIP);
-    return write_mie(env, CSR_MIE, newval);
 }
 
 static int read_vstvec(CPURISCVState *env, int csrno, target_ulong *val)
@@ -1341,9 +1352,9 @@ static int read_ccsr(CPURISCVState *env, int csrno, target_ulong *val)
     RISCVCPU *cpu = env_archcpu(env);
     target_ulong ccsr = 0;
     ccsr = set_field(ccsr, XCCSR_ENABLE, cpu->cfg.ext_cheri);
-    ccsr = set_field(ccsr, XCCSR_DIRTY, 1); /* Always report dirty */
     /* Read-only feature bits. */
-    ccsr = set_field(ccsr, XCCSR_TAG_CLEARING, CHERI_TAG_CLEAR_ON_INVALID);
+    ccsr = set_field(ccsr, XCCSR_TAG_CLEARING, CHERI_TAG_CLEAR_ON_INVALID(env));
+    ccsr = set_field(ccsr, XCCSR_NO_RELOCATION, CHERI_NO_RELOCATION(env));
 
 #if !defined(TARGET_RISCV32)
     if (csrno == CSR_SCCSR)
@@ -1596,7 +1607,7 @@ static void log_changed_csr_fn(CPURISCVState *env, int csrno,
      .csr_name=stringify(name)}
 
 /* Control and Status Register function table */
-static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
+riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     /* User Floating-Point CSRs */
     [CSR_FFLAGS] =              CSR_OP_RW(fs, fflags),
     [CSR_FRM] =                 CSR_OP_RW(fs, frm),
@@ -1611,26 +1622,22 @@ static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     /* User Timers and Counters */
     [CSR_CYCLE] =               CSR_OP_FN_R(ctr, read_instret, "cycle"),
     [CSR_INSTRET] =             CSR_OP_FN_R(ctr, read_instret, "instret"),
-#if defined(TARGET_RISCV32)
-    [CSR_CYCLEH] =              CSR_OP_FN_R(ctr, read_instreth, "cycleh"),
-    [CSR_INSTRETH] =            CSR_OP_FN_R(ctr, read_instreth, "instreth"),
-#endif
+    [CSR_CYCLEH] =              CSR_OP_FN_R(ctr32, read_instreth, "cycleh"),
+    [CSR_INSTRETH] =            CSR_OP_FN_R(ctr32, read_instreth, "instreth"),
 
-    /* In privileged mode, the monitor will have to emulate TIME CSRs only if
-     * rdtime callback is not provided by machine/platform emulation */
+    /*
+     * In privileged mode, the monitor will have to emulate TIME CSRs only if
+     * rdtime callback is not provided by machine/platform emulation.
+     */
     [CSR_TIME] =                CSR_OP_R(ctr, time),
-#if defined(TARGET_RISCV32)
-    [CSR_TIMEH] =               CSR_OP_R(ctr, timeh),
-#endif
+    [CSR_TIMEH] =               CSR_OP_R(ctr32, timeh),
 
 #if !defined(CONFIG_USER_ONLY)
     /* Machine Timers and Counters */
     [CSR_MCYCLE] =              CSR_OP_FN_R(any, read_instret, "mcycle"),
     [CSR_MINSTRET] =            CSR_OP_FN_R(any, read_instret, "minstret"),
-#if defined(TARGET_RISCV32)
-    [CSR_MCYCLEH] =             CSR_OP_FN_R(any, read_instreth, "mcycleh"),
-    [CSR_MINSTRETH] =           CSR_OP_FN_R(any, read_instreth, "minstreth"),
-#endif
+    [CSR_MCYCLEH] =             CSR_OP_FN_R(any32, read_instreth, "mcycleh"),
+    [CSR_MINSTRETH] =           CSR_OP_FN_R(any32, read_instreth, "minstreth"),
 
     /* Machine Information Registers */
     [CSR_MVENDORID] =           CSR_OP_FN_R(any, read_zero, "mvendorid"),
@@ -1647,9 +1654,7 @@ static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     [CSR_MTVEC] =               CSR_OP_RW(any, mtvec),
     [CSR_MCOUNTEREN] =          CSR_OP_RW(any, mcounteren),
 
-#if defined(TARGET_RISCV32)
-    [CSR_MSTATUSH] =            CSR_OP_RW(any, mstatush),
-#endif
+    [CSR_MSTATUSH] =            CSR_OP_RW(any32, mstatush),
 
     [CSR_MSCOUNTEREN] =         CSR_OP_RW(any, mscounteren),
 
@@ -1689,9 +1694,7 @@ static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     [CSR_HGEIP] =               CSR_OP_RW(hmode, hgeip),
     [CSR_HGATP] =               CSR_OP_RW(hmode, hgatp),
     [CSR_HTIMEDELTA] =          CSR_OP_RW(hmode, htimedelta),
-#if defined(TARGET_RISCV32)
-    [CSR_HTIMEDELTAH] =         CSR_OP_RW(hmode, htimedeltah),
-#endif
+    [CSR_HTIMEDELTAH] =         CSR_OP_RW(hmode32, htimedeltah),
 
     [CSR_VSSTATUS] =            CSR_OP_RW(hmode, vsstatus),
     [CSR_VSIP] =                CSR_OP_RMW(hmode, vsip),
@@ -1721,11 +1724,9 @@ static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
 
     /* Performance Counters */
     [CSR_HPMCOUNTER3   ... CSR_HPMCOUNTER31] =    CSR_OP_FN_R(ctr, read_zero, "hpmcounterN"),
-    [CSR_MHPMCOUNTER3  ... CSR_MHPMCOUNTER31] =   CSR_OP_FN_R(ctr, read_zero, "mhpmcounterN"),
-    [CSR_MHPMEVENT3    ... CSR_MHPMEVENT31] =     CSR_OP_FN_R(ctr, read_zero, "mhpmeventN"),
-#if defined(TARGET_RISCV32)
-    [CSR_HPMCOUNTER3H  ... CSR_HPMCOUNTER31H] =   CSR_OP_FN_R(ctr, read_zero, "hpmcounterNh"),
-    [CSR_MHPMCOUNTER3H ... CSR_MHPMCOUNTER31H] =  CSR_OP_FN_R(ctr, read_zero, "mhpmcounterNh"),
-#endif
+    [CSR_MHPMCOUNTER3  ... CSR_MHPMCOUNTER31] =   CSR_OP_FN_R(any, read_zero, "mhpmcounterN"),
+    [CSR_MHPMEVENT3    ... CSR_MHPMEVENT31] =     CSR_OP_FN_R(any, read_zero, "mhpmeventN"),
+    [CSR_HPMCOUNTER3H  ... CSR_HPMCOUNTER31H] =   CSR_OP_FN_R(ctr32, read_zero, "hpmcounterNh"),
+    [CSR_MHPMCOUNTER3H ... CSR_MHPMCOUNTER31H] =  CSR_OP_FN_R(any32, read_zero, "mhpmcounterNh"),
 #endif /* !CONFIG_USER_ONLY */
 };

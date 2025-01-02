@@ -19,3 +19,5 @@ PointerAlignment: Right
 SortIncludes: false
 StatementMacros:
   - type_init
+ForEachMacros:
+- CPU_FOREACH

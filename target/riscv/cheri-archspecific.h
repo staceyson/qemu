@@ -129,3 +129,17 @@ static inline void update_next_pcc_for_tcg(CPUArchState *env,
     env->_pc_is_current = true; // PCC.cursor is up-to-date again.
 #endif
 }
+
+static inline target_ulong cheri_ddc_relative_addr(CPURISCVState *env,
+                                                   target_ulong addr)
+{
+    /*
+     * CHERI-RISC-V ISAv8 relocated all integer accesses by DDC.address, but
+     * this was removed in later versions.
+     */
+    if (CHERI_NO_RELOCATION(env)) {
+        return addr;
+    } else {
+        return cap_get_cursor(cheri_get_ddc(env)) + addr;
+    }
+}

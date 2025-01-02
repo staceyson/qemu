@@ -20,11 +20,13 @@
 #include "qemu/osdep.h"
 #include "qemu/main-loop.h"
 #include "cpu.h"
+#include "hw/core/tcg-cpu-ops.h"
 #include "exec/exec-all.h"
 #include "exec/memory.h"
 #include "exec/address-spaces.h"
 #include "exec/cpu_ldst.h"
 #include "exec/cputlb.h"
+#include "exec/tb-hash.h"
 #include "exec/memory-internal.h"
 #include "exec/ram_addr.h"
 #include "tcg/tcg.h"
@@ -33,10 +35,11 @@
 #include "exec/helper-proto.h"
 #include "qemu/atomic.h"
 #include "qemu/atomic128.h"
-#include "translate-all.h"
+#include "exec/translate-all.h"
 #include "trace/trace-root.h"
 #include "trace/mem.h"
 #include "cheri_tagmem.h"
+#include "internal.h"
 #ifdef CONFIG_PLUGIN
 #include "qemu/plugin-memory.h"
 #endif
@@ -96,6 +99,23 @@ static void tlb_window_reset(CPUTLBDesc *desc, int64_t ns,
 {
     desc->window_begin_ns = ns;
     desc->window_max_entries = max_entries;
+}
+
+static void tb_jmp_cache_clear_page(CPUState *cpu, target_ulong page_addr)
+{
+    unsigned int i, i0 = tb_jmp_cache_hash_page(page_addr);
+
+    for (i = 0; i < TB_JMP_PAGE_SIZE; i++) {
+        qatomic_set(&cpu->tb_jmp_cache[i0 + i], NULL);
+    }
+}
+
+static void tb_flush_jmp_cache(CPUState *cpu, target_ulong addr)
+{
+    /* Discard jump cache entries for any tb which might potentially
+       overlap the flushed page.  */
+    tb_jmp_cache_clear_page(cpu, addr - TARGET_PAGE_SIZE);
+    tb_jmp_cache_clear_page(cpu, addr);
 }
 
 /**
@@ -1323,8 +1343,35 @@ static void tlb_fill(CPUState *cpu, target_ulong addr, int size,
      * This is not a probe, so only valid return is success; failure
      * should result in exception + longjmp to the cpu loop.
      */
-    ok = cc->tlb_fill(cpu, addr, size, access_type, mmu_idx, false, retaddr);
+    ok = cc->tcg_ops->tlb_fill(cpu, addr, size,
+                               access_type, mmu_idx, false, retaddr);
     assert(ok);
+}
+
+static inline void cpu_unaligned_access(CPUState *cpu, vaddr addr,
+                                        MMUAccessType access_type,
+                                        int mmu_idx, uintptr_t retaddr)
+{
+    CPUClass *cc = CPU_GET_CLASS(cpu);
+
+    cc->tcg_ops->do_unaligned_access(cpu, addr, access_type, mmu_idx, retaddr);
+}
+
+static inline void cpu_transaction_failed(CPUState *cpu, hwaddr physaddr,
+                                          vaddr addr, unsigned size,
+                                          MMUAccessType access_type,
+                                          int mmu_idx, MemTxAttrs attrs,
+                                          MemTxResult response,
+                                          uintptr_t retaddr)
+{
+    CPUClass *cc = CPU_GET_CLASS(cpu);
+
+    if (!cpu->ignore_memory_transaction_failures &&
+        cc->tcg_ops->do_transaction_failed) {
+        cc->tcg_ops->do_transaction_failed(cpu, physaddr, addr, size,
+                                           access_type, mmu_idx, attrs,
+                                           response, retaddr);
+    }
 }
 
 static uint64_t io_readx(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
@@ -1621,8 +1668,8 @@ probe_access_internal(CPUArchState *env, target_ulong addr, int fault_size,
             CPUState *cs = env_cpu(env);
             CPUClass *cc = CPU_GET_CLASS(cs);
 
-            if (!cc->tlb_fill(cs, addr, fault_size, access_type,
-                              mmu_idx, nonfault, retaddr)) {
+            if (!cc->tcg_ops->tlb_fill(cs, addr, fault_size, access_type,
+                                       mmu_idx, nonfault, retaddr)) {
                 /* Non-faulting page table read failed.  */
                 *phost = NULL;
                 return TLB_INVALID_MASK;
@@ -1702,7 +1749,7 @@ probe_access_inlined(CPUArchState *env, target_ulong addr, int size,
 
         /* Handle clean RAM pages.  */
         if (flags & TLB_NOTDIRTY) {
-            notdirty_write(env_cpu(env), addr, 1, iotlbentry, retaddr);
+            notdirty_write(env_cpu(env), addr, size, iotlbentry, retaddr);
         }
     }
 
@@ -1885,6 +1932,40 @@ load_memop(const void *haddr, MemOp op)
     }
 }
 
+#ifdef TARGET_CHERI
+#include "cheri-helper-utils.h"
+
+static void check_address_space_wrap(CPUArchState *env, target_ulong addr,
+                                     target_ulong size,
+                                     MMUAccessType access_type,
+                                     uintptr_t retaddr)
+{
+    if (access_type == MMU_INST_FETCH) {
+        return;
+    }
+    /*
+     * Check if access wraps around the address space, and was not prevented
+     * by earlier checks. This can only happen if we have a full address
+     * space DDC, since in all other cases bounds checks will be performed.
+     * Ideally we would emit the TCG checks unconditionally (which would
+     * allow not performing the check here), but omitting TGG bounds checks
+     * for full-AS DDC results in a major speedup when booting a
+     * non-CHERI/hybrid OS kernel.
+     */
+    target_ulong end_addr = 0;
+    if (unlikely(__builtin_add_overflow(addr, size, &end_addr) &&
+                 end_addr > 0)) {
+        assert(cap_get_top_full(cheri_get_ddc(env)) == CAP_MAX_TOP &&
+               cap_get_base(cheri_get_ddc(env)) == 0);
+        check_cap(env, cheri_get_ddc(env), 0, addr, CHERI_EXC_REGNUM_DDC, size,
+                  /*instavail=*/true, retaddr);
+    }
+}
+#endif
+
+static uint64_t full_ldub_mmu(CPUArchState *env, target_ulong addr,
+                              TCGMemOpIdx oi, uintptr_t retaddr);
+
 static inline uint64_t QEMU_ALWAYS_INLINE
 load_helper(CPUArchState *env, target_ulong addr, TCGMemOpIdx oi,
             uintptr_t retaddr, MemOp op, bool code_read,
@@ -1972,6 +2053,27 @@ load_helper(CPUArchState *env, target_ulong addr, TCGMemOpIdx oi,
     do_unaligned_access:
         addr1 = addr & ~((target_ulong)size - 1);
         addr2 = addr1 + size;
+#ifdef TARGET_CHERI
+        check_address_space_wrap(env, addr, size, access_type, retaddr);
+#endif
+#if defined(TARGET_RISCV) && defined(CONFIG_RVFI_DII)
+        /*
+         * When using RVFI-DII, we inject an ignored byte load to ensure that
+         * the tval value matches sail (which will be the unaligned address
+         * rather than one of the aligned ones that are used to fetch the real
+         * value). I believe QEMU's behaviour is legal according to the spec:
+         * "If mtval is written with a nonzero value when a misaligned load or
+         * store causes an access-fault or page-fault exception, then mtval
+         * will contain the virtual address of the portion of the access that
+         * caused the fault". However, we need to match sail to avoid diverging
+         * traces when running TestRIG.
+         */
+        if (env->rvfi_dii_have_injected_insn) {
+            (void)full_ldub_mmu(env, addr, make_memop_idx(MO_UB, mmu_idx),
+                                retaddr);
+        }
+#endif
+
         r1 = full_load(env, addr1, oi, retaddr);
         r2 = full_load(env, addr2, oi, retaddr);
         shift = (addr & (size - 1)) * 8;
@@ -2430,6 +2532,9 @@ store_helper_unaligned(CPUArchState *env, target_ulong addr, uint64_t val,
     index = tlb_index(env, mmu_idx, addr);
     entry = tlb_entry(env, mmu_idx, addr);
     tlb_addr = tlb_addr_write(entry);
+#ifdef TARGET_CHERI
+    check_address_space_wrap(env, addr, size, MMU_DATA_STORE, retaddr);
+#endif
 
     /*
      * Handle watchpoints.  Since this may trap, all checks

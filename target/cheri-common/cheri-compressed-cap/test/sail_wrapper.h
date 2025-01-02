@@ -46,7 +46,7 @@ bool sail_precise_is_representable_64(const cc64_cap_t* cap, cc64_addr_t new_add
 cc64_addr_t sail_null_pesbt_64(void);
 cc64_addr_t sail_representable_mask_64(cc64_addr_t len);
 cc64_addr_t sail_representable_length_64(cc64_addr_t len);
-bool sail_setbounds_64(cc64_cap_t* cap, cc64_addr_t req_base, cc64_length_t req_top);
+bool sail_setbounds_64(cc64_cap_t* cap, cc64_length_t req_len);
 cc64_cap_t sail_reset_capability_64(void);
 
 cc128_cap_t sail_decode_128_mem(cc128_addr_t pesbt, cc128_addr_t cursor, bool tag);
@@ -59,7 +59,7 @@ bool sail_precise_is_representable_128(const cc128_cap_t* cap, cc128_addr_t new_
 cc128_addr_t sail_null_pesbt_128(void);
 cc128_addr_t sail_representable_mask_128(cc128_addr_t len);
 cc128_addr_t sail_representable_length_128(cc128_addr_t len);
-bool sail_setbounds_128(cc128_cap_t* cap, cc128_addr_t req_base, cc128_length_t req_top);
+bool sail_setbounds_128(cc128_cap_t* cap, cc128_length_t req_len);
 cc128_cap_t sail_reset_capability_128(void);
 
 cc128m_cap_t sail_decode_128m_mem(cc128m_addr_t pesbt, cc128m_addr_t cursor, bool tag);
@@ -72,7 +72,7 @@ bool sail_precise_is_representable_128m(const cc128m_cap_t* cap, cc128m_addr_t n
 cc128m_addr_t sail_null_pesbt_128m(void);
 cc128m_addr_t sail_representable_mask_128m(cc128m_addr_t len);
 cc128m_addr_t sail_representable_length_128m(cc128m_addr_t len);
-bool sail_setbounds_128m(cc128m_cap_t* cap, cc128m_addr_t req_base, cc128m_length_t req_top);
+bool sail_setbounds_128m(cc128m_cap_t* cap, cc128m_length_t req_len);
 cc128m_cap_t sail_reset_capability_128m(void);
 
 #define _cc_sail_decode_mem _CC_CONCAT(_CC_CONCAT(sail_decode_, CC_FORMAT_LOWER), _mem)
@@ -104,9 +104,7 @@ public:
     static inline addr_t sail_null_pesbt() { return sail_null_pesbt_64(); }
     static inline addr_t sail_representable_mask(addr_t len) { return sail_representable_mask_64(len); }
     static inline addr_t sail_representable_length(addr_t len) { return sail_representable_length_64(len); }
-    static inline bool sail_setbounds(cap_t* cap, addr_t req_base, length_t req_top) {
-        return sail_setbounds_64(cap, req_base, req_top);
-    }
+    static inline bool sail_setbounds(cap_t* cap, length_t req_len) { return sail_setbounds_64(cap, req_len); }
     static inline cap_t sail_reset_capability() { return sail_reset_capability_64(); }
 };
 
@@ -130,9 +128,7 @@ public:
     static inline addr_t sail_null_pesbt() { return sail_null_pesbt_128(); }
     static inline addr_t sail_representable_mask(addr_t len) { return sail_representable_mask_128(len); }
     static inline addr_t sail_representable_length(addr_t len) { return sail_representable_length_128(len); }
-    static inline bool sail_setbounds(cap_t* cap, addr_t req_base, length_t req_top) {
-        return sail_setbounds_128(cap, req_base, req_top);
-    }
+    static inline bool sail_setbounds(cap_t* cap, length_t req_len) { return sail_setbounds_128(cap, req_len); }
     static inline cap_t sail_reset_capability() { return sail_reset_capability_128(); }
 };
 
@@ -156,9 +152,7 @@ public:
     static inline addr_t sail_null_pesbt() { return sail_null_pesbt_128m(); }
     static inline addr_t sail_representable_mask(addr_t len) { return sail_representable_mask_128m(len); }
     static inline addr_t sail_representable_length(addr_t len) { return sail_representable_length_128m(len); }
-    static inline bool sail_setbounds(cap_t* cap, addr_t req_base, length_t req_top) {
-        return sail_setbounds_128m(cap, req_base, req_top);
-    }
+    static inline bool sail_setbounds(cap_t* cap, addr_t req_len) { return sail_setbounds_128m(cap, req_len); }
     static inline cap_t sail_reset_capability() { return sail_reset_capability_128m(); }
 };
 

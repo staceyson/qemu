@@ -393,8 +393,8 @@ static inline __attribute__((always_inline)) bool load_store_implementation(
                 tcg_temp_free_i32(tcg_idx);
             } else {
                 (is_load ? gen_helper_load_cap_via_cap
-                         : gen_helper_store_cap_via_cap)(cpu_env, tcg_rd,
-                                                         tcg_base_reg, addr);
+                         : gen_helper_store_cap_via_cap)(cpu_env, tcg_rd, addr,
+                                                         tcg_base_reg);
             }
 
         } else {
@@ -592,8 +592,8 @@ TRANS_F(ADR)
     if (pcc) {
         // Can just work this out as a constant
         uint64_t result = im + ctx->pc_curr;
-        if (!c64 && cctlr_set(ctx, CCTLR_PCCBO)) {
-            result -= ctx->base.pcc_base;
+        if (!c64) {
+            result -= pcc_reloc(ctx);
         }
         if (page_align) {
             result &= ~((1 << 12) - 1);

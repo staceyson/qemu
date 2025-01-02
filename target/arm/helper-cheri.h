@@ -28,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#ifdef CONFIG_TCG_LOG_INSTR
-DEF_HELPER_FLAGS_3(arm_log_instr, TCG_CALL_NO_WG, void, env, tl, i32)
-#endif
-
 DEF_HELPER_5(load_cap_pair_via_cap, void, env, i32, i32, i32, tl)
 DEF_HELPER_5(store_cap_pair_via_cap, void, env, i32, i32, i32, tl)
 

@@ -71,6 +71,7 @@ typedef struct DisasContext {
     bool hlsx;
 #ifdef TARGET_CHERI
     bool capmode;
+    bool cheri_v9_semantics;
 #endif
     /* vector extension */
     bool vill;
@@ -79,6 +80,7 @@ typedef struct DisasContext {
     uint16_t vlen;
     uint16_t mlen;
     bool vl_eq_vlmax;
+    CPUState *cs;
 } DisasContext;
 
 #ifdef TARGET_RISCV64
@@ -476,14 +478,16 @@ static void gen_jal(DisasContext *ctx, int rd, target_ulong imm)
 
     /* check misaligned: */
     next_pc = ctx->base.pc_next + imm;
+    gen_check_branch_target(ctx, next_pc);
+
     if (!has_ext(ctx, RVC)) {
         if ((next_pc & 0x3) != 0) {
             gen_exception_inst_addr_mis(ctx);
             return;
         }
     }
-    // For CHERI the result is an offset relative to PCC.base
-    gen_set_gpr_const(rd, ctx->pc_succ_insn - pcc_base(ctx));
+    /* For CHERI ISAv8 the result is an offset relative to PCC.base */
+    gen_set_gpr_const(rd, ctx->pc_succ_insn - pcc_reloc(ctx));
 
     gen_goto_tb(ctx, 0, ctx->base.pc_next + imm, /*bounds_check=*/true); /* must use this for safety */
     ctx->base.is_jmp = DISAS_NORETURN;
@@ -498,8 +502,8 @@ static void gen_jalr(DisasContext *ctx, int rd, int rs1, target_ulong imm)
     TCGv t0 = tcg_temp_local_new();
 
     gen_get_gpr(t0, rs1);
-    // For CHERI the jump destination is an offset relative to PCC.base
-    tcg_gen_addi_tl(t0, t0, imm + pcc_base(ctx));
+    /* For CHERI ISAv8 the destination is an offset relative to PCC.base. */
+    tcg_gen_addi_tl(t0, t0, imm + pcc_reloc(ctx));
     tcg_gen_andi_tl(t0, t0, (target_ulong)-2);
     gen_check_branch_target_dynamic(ctx, t0);
     // Note: Only update cpu_pc after a successful bounds check to avoid
@@ -513,8 +517,8 @@ static void gen_jalr(DisasContext *ctx, int rd, int rs1, target_ulong imm)
         tcg_gen_brcondi_tl(TCG_COND_NE, t0, 0x0, misaligned);
     }
 
-    // For CHERI the result is an offset relative to PCC.base
-    gen_set_gpr_const(rd, ctx->pc_succ_insn - pcc_base(ctx));
+    /* For CHERI ISAv8 the result is an offset relative to PCC.base */
+    gen_set_gpr_const(rd, ctx->pc_succ_insn - pcc_reloc(ctx));
     lookup_and_goto_ptr(ctx);
 
     if (misaligned) {
@@ -747,6 +751,15 @@ static bool gen_shift(DisasContext *ctx, arg_r *a,
     return true;
 }
 
+static uint32_t opcode_at(DisasContextBase *dcbase, target_ulong pc)
+{
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
+    CPUState *cpu = ctx->cs;
+    CPURISCVState *env = cpu->env_ptr;
+
+    return cpu_ldl_code(env, pc);
+}
+
 /* Include insn module translation function */
 #ifdef TARGET_CHERI
 /* Must be included first since the helpers are used by trans_rvi.c.inc */
@@ -854,6 +867,11 @@ get_capmode_dependent_rmw_addr(DisasContext *ctx, int reg_num,
 /* Include the auto-generated decoder for 16 bit insn */
 #include "decode-insn16.c.inc"
 
+static bool trans_c_hint(DisasContext *ctx, arg_c_hint *a)
+{
+    return true;
+}
+
 static void decode_opc(CPURISCVState *env, DisasContext *ctx)
 {
 #ifdef CONFIG_RVFI_DII
@@ -913,6 +931,7 @@ static void riscv_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     ctx->mstatus_fs = tb_flags & TB_FLAGS_MSTATUS_FS;
 #ifdef TARGET_CHERI
     ctx->capmode = tb_in_capmode(ctx->base.tb);
+    ctx->cheri_v9_semantics = cpu->cfg.ext_cheri_v9;
 #endif
     ctx->priv_ver = env->priv_ver;
 #if !defined(CONFIG_USER_ONLY)
@@ -934,6 +953,7 @@ static void riscv_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     ctx->lmul = FIELD_EX32(tb_flags, TB_FLAGS, LMUL);
     ctx->mlen = 1 << (ctx->sew  + 3 - ctx->lmul);
     ctx->vl_eq_vlmax = FIELD_EX32(tb_flags, TB_FLAGS, VL_EQ_VLMAX);
+    ctx->cs = cs;
 }
 
 static void riscv_tr_tb_start(DisasContextBase *db, CPUState *cpu)

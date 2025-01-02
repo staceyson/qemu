@@ -72,23 +72,25 @@ TEST_CASE("Fuzzer assertion exact untagged", "[fuzz]") {
     REQUIRE(decoded.top() == top);
     REQUIRE(decoded.address() == addr);
     {
-        auto sail_setbounds_base_top = decoded;
-        auto cc_setbounds_base_top = decoded;
-        TestAPICC::sail_setbounds(&sail_setbounds_base_top, base, top);
-        TestAPICC::setbounds(&cc_setbounds_base_top, base, top);
+        TestAPICC::cap_t tmp = decoded;
+        _cc_N(set_addr)(&tmp, base);
+        TestAPICC::cap_t sail_setbounds_base_top = tmp;
+        TestAPICC::cap_t cc_setbounds_base_top = tmp;
+        TestAPICC::sail_setbounds(&sail_setbounds_base_top, decoded.length());
+        TestAPICC::setbounds(&cc_setbounds_base_top, decoded.length());
         CHECK(sail_setbounds_base_top == cc_setbounds_base_top);
     }
     {
         auto sail_setbounds_addr_top = decoded;
         auto cc_setbounds_addr_top = decoded;
-        TestAPICC::sail_setbounds(&sail_setbounds_addr_top, addr, top);
-        TestAPICC::setbounds(&cc_setbounds_addr_top, addr, top);
+        TestAPICC::sail_setbounds(&sail_setbounds_addr_top, decoded.top() - decoded.address());
+        TestAPICC::setbounds(&cc_setbounds_addr_top, decoded.top() - decoded.address());
         CHECK(cc_setbounds_addr_top == cc_setbounds_addr_top);
     }
 
-    do_csetbounds<TestAPICC>(decoded, decoded.top(), nullptr);
+    do_csetbounds<TestAPICC>(decoded, nullptr, decoded.length());
     decoded._cr_cursor = base;
-    do_csetbounds<TestAPICC>(decoded, decoded.top(), nullptr);
+    do_csetbounds<TestAPICC>(decoded, nullptr, decoded.length());
 }
 
 TEST_CASE("TestRIG assertion untagged max cap", "[fuzz]") {
@@ -100,15 +102,16 @@ TEST_CASE("TestRIG assertion untagged max cap", "[fuzz]") {
 
     auto sail_setbounds_result = cap;
     auto cc_setbounds_result = cap;
-    const TestAPICC::length_t req_top = (TestAPICC::length_t)cap.address() + req_len;
-    TestAPICC::sail_setbounds(&sail_setbounds_result, cap.address(), req_top);
-    TestAPICC::setbounds(&cc_setbounds_result, cap.address(), req_top);
+    TestAPICC::sail_setbounds(&sail_setbounds_result, req_len);
+    TestAPICC::setbounds(&cc_setbounds_result, req_len);
     CHECK(sail_setbounds_result == cc_setbounds_result);
-
-    do_csetbounds<TestAPICC>(cap, req_len, nullptr);
+    // The requested top of 0x1fffffffff4232000 will be rounded to 0x20000000000000000 which is not
+    // representable with the 65-bit top and is therefore truncated to zero.
+    CHECK(sail_setbounds_result.top() == 0);
+    do_csetbounds<TestAPICC>(cap, nullptr, req_len);
     auto cap2 = cap;
     cap2._cr_cursor = cap.base();
-    do_csetbounds<TestAPICC>(cap2, req_len, nullptr);
+    do_csetbounds<TestAPICC>(cap2, nullptr, req_len);
 }
 
 TEST_CASE("TestRIG setbounds result mismatch", "[fuzz]") {
@@ -124,14 +127,13 @@ TEST_CASE("TestRIG setbounds result mismatch", "[fuzz]") {
 
     auto sail_setbounds_result = cap;
     auto cc_setbounds_result = cap;
-    const TestAPICC::length_t req_top = (TestAPICC::length_t)cap.address() + req_len;
-    TestAPICC::sail_setbounds(&sail_setbounds_result, cap.address(), req_top);
-    TestAPICC::setbounds(&cc_setbounds_result, cap.address(), req_top);
+    TestAPICC::sail_setbounds(&sail_setbounds_result, req_len);
+    TestAPICC::setbounds(&cc_setbounds_result, req_len);
     CHECK(sail_setbounds_result == cc_setbounds_result);
     REQUIRE(cc_setbounds_result.base() == UINT64_C(0xFFFFFFFFFFFFF934));
     REQUIRE(cc_setbounds_result.address() == UINT64_C(0xFFFFFFFFFFFFF934));
     REQUIRE(cc_setbounds_result.top() == CC128_MAX_TOP + 0b10111100101);
     REQUIRE(cc_setbounds_result.length() == req_len);
 
-    check_csetbounds_invariants<TestAPICC>(cap, cc_setbounds_result, true, cap.address(), req_top);
+    check_csetbounds_invariants<TestAPICC>(cap, cc_setbounds_result, true, req_len);
 }

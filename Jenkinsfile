@@ -56,34 +56,57 @@ def maybeArchiveArtifacts(params, String os) {
     }
 }
 
-def bootCheriBSDForAllArchitectures(params, String qemuConfig) {
+def addBootJobs(bootJobs, params, String qemuConfig, String architecture, String cheribsdBranch, String suffix="") {
+    // For purecap architectures we boot both hybrid and purecap kernels.
+    if (architecture.endsWith("-purecap")) {
+        bootJobs["${architecture}-purecap-kernel${suffix} on ${qemuConfig}"] =
+            { -> bootCheriBSD(params, qemuConfig, "${architecture}-purecap-kernel${suffix}", architecture,
+                              'purecap', cheribsdBranch) }
+        bootJobs["${architecture}-hybrid-kernel${suffix} on ${qemuConfig}"] =
+            { -> bootCheriBSD(params, qemuConfig, "${architecture}-hybrid-kernel${suffix}", architecture,
+                              'hybrid', cheribsdBranch) }
+    } else {
+        bootJobs["${architecture} on ${qemuConfig}"] =
+            { -> bootCheriBSD(params, qemuConfig, "${architecture}${suffix}", architecture, null, cheribsdBranch) }
+    }
+}
+
+def bootCheriBSDForAllArchitectures(params, String qemuConfig, boolean isDebug) {
     stage("Boot CheriBSD (${qemuConfig})") {
         bootJobs = [failFast: false]
         ["riscv64", "riscv64-purecap", "aarch64", "morello-purecap"].each { String architecture ->
-            // For purecap architectures we boot both hybrid and purecap kernels.
-            if (architecture.endsWith("-purecap")) {
-                bootJobs["${architecture}-purecap-kernel on ${qemuConfig}"] =
-                    { -> bootCheriBSD(params, qemuConfig, "${architecture}-purecap-kernel", architecture,
-                                      ["--run-${architecture}/kernel-abi purecap"]) }
-                bootJobs["${architecture}-hybrid-kernel on ${qemuConfig}"] =
-                    { -> bootCheriBSD(params, qemuConfig, "${architecture}-hybrid-kernel", architecture,
-                                      ["--run-${architecture}/kernel-abi hybrid"]) }
-            } else {
-                bootJobs["${architecture} on ${qemuConfig}"] =
-                    { -> bootCheriBSD(params, qemuConfig, architecture, architecture, []) }
+            addBootJobs(bootJobs, params, qemuConfig, architecture, "main")
+            if (!isDebug) {
+                // For the non-ASAN build of QEMU we also boot the latest release
+                addBootJobs(bootJobs, params, qemuConfig, architecture, "releng%252F22.12", "-latest-release")
+            }
+            def targetBranch = env.CHANGE_TARGET ? env.CHANGE_TARGET : env.BRANCH_NAME;
+            if (targetBranch == 'dev') {
+                addBootJobs(bootJobs, params, qemuConfig, architecture, "dev", "-dev")
             }
         }
         parallel bootJobs
     }
 }
 
-def bootCheriBSD(params, String qemuConfig, String stageSuffix, String archSuffix, extraCheribuildArgs) {
+def bootCheriBSD(params, String qemuConfig, String stageSuffix, String archSuffix, String kernelABI, String cheribsdBranch="main") {
     try {
+        def defaultKernelAbi = cheribsdInfo.getDefaultKernelAbi(cheribsdBranch)
+        def extraCheribuildArgs = [
+            "--cheribsd/default-kernel-abi=${defaultKernelAbi}"
+        ]
         def compressedKernel = "artifacts-${archSuffix}/kernel.xz"
+        if (kernelABI != null) {
+            extraCheribuildArgs += ["--run-${archSuffix}/kernel-abi=${kernelABI}"]
+            if (archSuffix.startsWith('riscv64') && kernelABI != defaultKernelAbi) {
+                def kernelConfig = cheribsdInfo.getKernelConfig(archSuffix, kernelABI, cheribsdBranch)
+                compressedKernel = "artifacts-${archSuffix}/kernel.${kernelConfig}.xz"
+            }
+        }
         def compressedDiskImage = "artifacts-${archSuffix}/cheribsd-${archSuffix}.img.xz"
         dir (stageSuffix) {
             sh "rm -rfv artifacts-${archSuffix}/cheribsd-*.img* artifacts-${archSuffix}/kernel*"
-            copyArtifacts projectName: "CheriBSD-pipeline/main", filter: "${compressedDiskImage}, ${compressedKernel}",
+            copyArtifacts projectName: "CheriBSD-pipeline/${cheribsdBranch}", filter: "${compressedDiskImage}, ${compressedKernel}",
                          target: '.', fingerprintArtifacts: false, flatten: false, selector: lastSuccessful()
         }
         def testExtraArgs = [
@@ -139,17 +162,17 @@ selectedConfigs.each { config ->
             def extraQemuArgs = ''
             boolean isDebug = config.endsWith('-debug')
             if (isDebug) {
-                extraQemuArgs = '--qemu/configure-options=--enable-rvfi-dii --qemu/build-type=Debug --qemu/use-asan'
+                extraQemuArgs = '"--qemu/configure-options=--enable-rvfi-dii --extra-cflags=-O2 --extra-cxxflags=-O2" --qemu/build-type=Debug'
             }
             def qemuResult = cheribuildProject(target: 'qemu', cpu: 'native', skipArtifacts: true,
                     nodeLabel: null,
                     extraArgs: "--without-sdk --install-prefix=/usr $extraQemuArgs",
-                    runTests: /* true */ false,
+                    runTests: true,
                     uniqueId: "qemu-build-${config}",
                     skipTarball: true,
                     afterBuild: { params ->
                         extraBuildSteps(params, os)
-                        bootCheriBSDForAllArchitectures(params, config)
+                        bootCheriBSDForAllArchitectures(params, config, isDebug)
                         // For Debug+ASAN we don't archive artifacts.
                         if (!isDebug) {
                             maybeArchiveArtifacts(params, os)

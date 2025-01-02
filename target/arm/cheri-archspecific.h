@@ -237,3 +237,13 @@ static inline void update_next_pcc_for_tcg(CPUARMState *env,
     if (executive_changed)
         aarch64_restore_sp(env, cur_el);
 }
+
+static inline target_ulong cheri_ddc_relative_addr(CPUARMState *env,
+                                                   target_ulong addr)
+{
+    /* Morello relocates addresses by DDC.base if CCTLR.DDCBO is set. */
+    if ((env->CCTLR_el[arm_current_el(env)] & CCTLR_DDCBO) != 0) {
+        return cap_get_base(cheri_get_ddc(env)) + addr;
+    }
+    return addr;
+}

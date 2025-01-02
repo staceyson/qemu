@@ -25,6 +25,7 @@
 #include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "qemu/units.h"
+#include "qemu/accel.h"
 #include "sysemu/tcg.h"
 #include "qemu-version.h"
 #include <machine/trap.h>
@@ -66,7 +67,7 @@ bool ras_thread_set = false;
 int singlestep;
 static const char *cpu_model;
 static const char *cpu_type;
-unsigned long guest_base;
+uintptr_t guest_base;
 bool have_guest_base;
 #if (TARGET_LONG_BITS == 32) && (HOST_LONG_BITS == 64)
 /*
@@ -472,10 +473,14 @@ int main(int argc, char **argv)
         cpu_model = TARGET_DEFAULT_CPU_MODEL;
     }
 
-    /* init tcg before creating CPUs and to get qemu_host_page_size */
-    tcg_exec_init(0, false);
-
     cpu_type = parse_cpu_option(cpu_model);
+    /* init tcg before creating CPUs and to get qemu_host_page_size */
+    {
+        AccelClass *ac = ACCEL_GET_CLASS(current_accel());
+
+        ac->init_machine(NULL);
+        accel_init_interfaces(ac);
+    }
     cpu = cpu_create(cpu_type);
     env = cpu->env_ptr;
     cpu_reset(cpu);
@@ -526,7 +531,7 @@ int main(int argc, char **argv)
     g_free(target_environ);
 
     if (qemu_loglevel_mask(CPU_LOG_PAGE)) {
-        qemu_log("guest_base  0x%lx\n", guest_base);
+        qemu_log("guest_base  %p\n", (void *)guest_base);
         log_page_dump("binary load");
 
         qemu_log("start_brk   0x" TARGET_ABI_FMT_lx "\n", info->start_brk);

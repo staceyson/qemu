@@ -90,9 +90,16 @@ typedef struct DisasContextBase {
 } DisasContextBase;
 
 #ifdef TARGET_CHERI
-#define pcc_base(ctx) ctx->base.pcc_base
+/**
+ * @return the value by which PC should be relocated (or zero if PCC relocation
+ * is off). For Morello this is toggleable at runtime, but other architectures
+ * either use no relocation or PCC.base unconditionally.
+ * @related CHERI_TRANSLATE_PCC_RELOCATION(ctx)
+ */
+#define pcc_reloc(ctx)                                                         \
+    (CHERI_TRANSLATE_PCC_RELOCATION(ctx) ? (ctx)->base.pcc_base : 0)
 #else
-#define pcc_base(ctx) 0
+#define pcc_reloc(ctx) 0
 #endif
 
 /**

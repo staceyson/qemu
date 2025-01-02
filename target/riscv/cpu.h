@@ -46,6 +46,12 @@
 #define TYPE_RISCV_CPU_SIFIVE_U34       RISCV_CPU_TYPE_NAME("sifive-u34")
 #define TYPE_RISCV_CPU_SIFIVE_U54       RISCV_CPU_TYPE_NAME("sifive-u54")
 
+#if defined(TARGET_RISCV32)
+# define TYPE_RISCV_CPU_BASE            TYPE_RISCV_CPU_BASE32
+#elif defined(TARGET_RISCV64)
+# define TYPE_RISCV_CPU_BASE            TYPE_RISCV_CPU_BASE64
+#endif
+
 #define RV32 ((target_ulong)1 << (TARGET_LONG_BITS - 2))
 #define RV64 ((target_ulong)2 << (TARGET_LONG_BITS - 2))
 
@@ -270,6 +276,10 @@ struct CPURISCVState {
     target_ulong satp_hs;
     uint64_t mstatus_hs;
 
+    /* Signals whether the current exception occurred with two-stage address
+       translation active. */
+    bool two_stage_lookup;
+
     target_ulong scounteren;
     target_ulong mcounteren;
 
@@ -399,6 +409,8 @@ struct RISCVCPU {
     CPUNegativeOffsetState neg;
     CPURISCVState env;
 
+    char *dyn_csr_xml;
+
     /* Configuration Settings */
     struct {
         bool ext_i;
@@ -418,6 +430,7 @@ struct RISCVCPU {
         bool ext_icsr;
 #ifdef TARGET_CHERI
         bool ext_cheri;
+        bool ext_cheri_v9; /* Temporary flag to support new semantics. */
 #endif
 
         char *priv_spec;
@@ -470,30 +483,35 @@ void riscv_log_instr_scr_changed(CPURISCVState *env, int scrno);
 #define riscv_log_instr_scr_changed(env, scrno) ((void)0)
 #endif /* !CONFIG_TCG_LOG_INSTR */
 
-
-// From 5.3.6 Special Capability Registers (SCRs)
-// Where an SCR extends a RISC-V CSR, e.g. MTCC extending mtvec, any read to the
-// CSR shall return the offset of the corresponding SCR. Similarly, any write to
-// the CSR shall set the offset of the SCR to the value written. This shall be
-// equivalent to a CSetOffset instruction, but with any exception condition
-// instead just clearing the tag of the SCR. This allows sealed capabilities to
-// be held in SCRs without allowing them to be modified in a tag-preserving way,
-// while also pre- venting exceptions when installing trap vectors: something
-// that can be problematic where the task is delegated to a higher privilege
-// level.
-//
-// GET_SPECIAL_REG_ARCH returns the architectural view of the underlying CSR,
-// namely the offset. GET_SPECIAL_REG_ADDR returns the address as we feed our
-// PC around as an address not the architectural offset.
+/*
+ * From 5.3.6 Special Capability Registers (SCRs)
+ * Where an SCR extends a RISC-V CSR, e.g. MTCC extending mtvec, any read to the
+ * CSR shall return the address (offset for ISAv8) of the corresponding SCR.
+ * Similarly, any write to the CSR shall set the address (offset for ISAv8) of
+ * the SCR to the value written.
+ */
 #ifdef TARGET_CHERI
+#define SCR_TO_PROGRAM_COUNTER(env, scr)                                       \
+    (CHERI_NO_RELOCATION(env) ? cap_get_cursor(scr)                            \
+                              : (target_ulong)cap_get_offset(scr))
+/**
+ * @returns the architectural view of the underlying SCR,address/offset
+ * depending on CHERI ISA version.
+ */
 #define GET_SPECIAL_REG_ARCH(env, name, cheri_name)                            \
-    ((target_ulong)cap_get_offset(&((env)->cheri_name)))
+    SCR_TO_PROGRAM_COUNTER(env, &((env)->cheri_name))
+/**
+ * @returns the address of a given SCR as we feed our PC around as an address
+ * not the architectural offset.
+ */
 #define GET_SPECIAL_REG_ADDR(env, name, cheri_name)                            \
     ((target_ulong)cap_get_cursor(&((env)->cheri_name)))
-void update_special_register_offset(CPURISCVState *env, cap_register_t *scr,
-                                    const char *name, target_ulong value);
+void update_special_register(CPURISCVState *env, cap_register_t *scr,
+                             const char *name, target_ulong value);
+#define SCR_SET_PROGRAM_COUNTER(env, scr, name, value)                         \
+    update_special_register(env, scr, name, value)
 #define SET_SPECIAL_REG(env, name, cheri_name, value)                          \
-    update_special_register_offset(env, &((env)->cheri_name), #cheri_name, value)
+    SCR_SET_PROGRAM_COUNTER(env, &((env)->cheri_name), #cheri_name, value)
 
 #else /* ! TARGET_CHERI */
 #define GET_SPECIAL_REG_ARCH(env, name, cheri_name) ((env)->name)
@@ -566,6 +584,21 @@ void rvfi_dii_communicate(CPUState *cs, CPURISCVState *env, bool was_trap);
         gen_rvfi_dii_set_field(type, field, tmp);                              \
         tcg_temp_free_i64(tmp);                                                \
     } while (0)
+#define gen_rvfi_dii_set_mem_data(rw, addr, val, memop, extend_to_i64)         \
+    do {                                                                       \
+        TCGv_i64 tmp = tcg_temp_new_i64();                                     \
+        extend_to_i64(tmp, val);                                               \
+        tcg_gen_andi_i64(tmp, tmp, MAKE_64BIT_MASK(0, 8 * memop_size(memop))); \
+        gen_rvfi_dii_set_field_zext_addr(MEM, mem_addr, addr);                 \
+        gen_rvfi_dii_set_field(MEM, mem_##rw##data[0], tmp);                   \
+        gen_rvfi_dii_set_field_const_i32(MEM, mem_##rw##mask,                  \
+                                         memop_rvfi_mask(memop));              \
+        tcg_temp_free_i64(tmp);                                                \
+    } while (0)
+#define gen_rvfi_dii_set_mem_data_i32(rw, addr, val_i32, memop)                \
+    gen_rvfi_dii_set_mem_data(rw, addr, val_i32, memop, tcg_gen_extu_i32_i64)
+#define gen_rvfi_dii_set_mem_data_i64(rw, addr, val_i64, memop)                \
+    gen_rvfi_dii_set_mem_data(rw, addr, val_i64, memop, tcg_gen_mov_i64)
 #else
 #define gen_rvfi_dii_set_field(type, field, arg) ((void)0)
 #define gen_rvfi_dii_set_field_zext_i32(type, field, arg) ((void)0)
@@ -579,6 +612,10 @@ void rvfi_dii_communicate(CPUState *cs, CPURISCVState *env, bool was_trap);
 
 const char *riscv_cpu_get_trap_name(target_ulong cause, bool async);
 void riscv_cpu_do_interrupt(CPUState *cpu);
+int riscv_cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cs,
+                               int cpuid, void *opaque);
+int riscv_cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cs,
+                               int cpuid, void *opaque);
 int riscv_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
 int riscv_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 bool riscv_cpu_exec_interrupt(CPUState *cs, int interrupt_request);
@@ -650,6 +687,8 @@ FIELD(TB_FLAGS, SEW, 5, 3)
 FIELD(TB_FLAGS, VILL, 8, 1)
 /* Is a Hypervisor instruction load/store allowed? */
 FIELD(TB_FLAGS, HLSX, 9, 1)
+
+bool riscv_cpu_is_32bit(CPURISCVState *env);
 
 /*
  * A simplification for VLMAX
@@ -779,6 +818,7 @@ typedef void (*riscv_csr_log_update_fn)(CPURISCVState *env, int csrno,
                                         target_ulong new_value);
 
 typedef struct {
+    const char *name;
     riscv_csr_predicate_fn predicate;
     riscv_csr_read_fn read;
     riscv_csr_write_fn write;
@@ -786,6 +826,14 @@ typedef struct {
     riscv_csr_log_update_fn log_update;
     const char *csr_name;
 } riscv_csr_operations;
+
+/* CSR function table constants */
+enum {
+    CSR_TABLE_SIZE = 0x1000
+};
+
+/* CSR function table */
+extern riscv_csr_operations csr_ops[CSR_TABLE_SIZE];
 
 void riscv_get_csr_ops(int csrno, riscv_csr_operations *ops);
 void riscv_set_csr_ops(int csrno, riscv_csr_operations *ops);

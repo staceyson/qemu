@@ -157,3 +157,10 @@ static inline void update_next_pcc_for_tcg(CPUMIPSState *env,
     env->active_tc.CapBranchTarget = *target;
     // Note: env->_pc_is_current is updated in copy_cap_btarget_to_pcc().
 }
+
+static inline target_ulong cheri_ddc_relative_addr(CPUMIPSState *env,
+                                                   target_ulong addr)
+{
+    /* CHERI-MIPS relocates all integer accesses by DDC.address. */
+    return cap_get_cursor(cheri_get_ddc(env)) + addr;
+}

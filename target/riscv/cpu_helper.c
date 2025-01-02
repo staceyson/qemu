@@ -25,6 +25,7 @@
 #include "exec/log_instr.h"
 #include "tcg/tcg-op.h"
 #include "trace.h"
+#include "semihosting/common-semi.h"
 #include "disas/disas.h"
 #include "helper_utils.h"
 #ifdef TARGET_CHERI
@@ -373,6 +374,50 @@ extern bool rvfi_debug_output;
 #define RISCV_PTE_TRAPPY 0
 #endif
 
+/*
+ * get_physical_address_pmp - check PMP permission for this physical address
+ *
+ * Match the PMP region and check permission for this physical address and it's
+ * TLB page. Returns 0 if the permission checking was successful
+ *
+ * @env: CPURISCVState
+ * @prot: The returned protection attributes
+ * @tlb_size: TLB page size containing addr. It could be modified after PMP
+ *            permission checking. NULL if not set TLB page for addr.
+ * @addr: The physical address to be checked permission
+ * @access_type: The type of MMU access
+ * @mode: Indicates current privilege level.
+ */
+static int get_physical_address_pmp(CPURISCVState *env, int *prot,
+                                    target_ulong *tlb_size, hwaddr addr,
+                                    int size, MMUAccessType access_type,
+                                    int mode)
+{
+    pmp_priv_t pmp_priv;
+    target_ulong tlb_size_pmp = 0;
+
+    if (!riscv_feature(env, RISCV_FEATURE_PMP)) {
+        *prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+        return TRANSLATE_SUCCESS;
+    }
+
+    if (!pmp_hart_has_privs(env, addr, size,
+                            access_type_to_pmp_priv(access_type), &pmp_priv,
+                            mode)) {
+        *prot = 0;
+        return TRANSLATE_PMP_FAIL;
+    }
+
+    *prot = pmp_priv_to_page_prot(pmp_priv);
+    if (tlb_size != NULL) {
+        if (pmp_is_range_in_tlb(env, addr & ~(*tlb_size - 1), &tlb_size_pmp)) {
+            *tlb_size = tlb_size_pmp;
+        }
+    }
+
+    return TRANSLATE_SUCCESS;
+}
+
 /* get_physical_address - get the physical address for this virtual address
  *
  * Do a page table walk to obtain the physical address corresponding to a
@@ -426,11 +471,15 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
      * was called. Background registers will be used if the guest has
      * forced a two stage translation to be on (in HS or M mode).
      */
-    if (!riscv_cpu_virt_enabled(env) && riscv_cpu_two_stage_lookup(mmu_idx)) {
+    if (!riscv_cpu_virt_enabled(env) && two_stage) {
         use_background = true;
     }
 
-    if (mode == PRV_M && access_type != MMU_INST_FETCH) {
+    /* MPRV does not affect the virtual-machine load/store
+       instructions, HLV, HLVX, and HSV. */
+    if (riscv_cpu_two_stage_lookup(mmu_idx)) {
+        mode = get_field(env->hstatus, HSTATUS_SPVP);
+    } else if (mode == PRV_M && access_type != MMU_INST_FETCH) {
         if (get_field(env->mstatus, MSTATUS_MPRV)) {
             mode = get_field(env->mstatus, MSTATUS_MPP);
         }
@@ -473,7 +522,8 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
         vm = get_field(env->hgatp, HGATP_MODE);
         widened = 2;
     }
-    sum = get_field(env->mstatus, MSTATUS_SUM);
+    /* status.SUM will be ignored if execute on background */
+    sum = get_field(env->mstatus, MSTATUS_SUM) || use_background;
     switch (vm) {
     case VM_1_10_SV32:
       levels = 2; ptidxbits = 10; ptesize = 4; break;
@@ -549,17 +599,21 @@ restart:
             pte_addr = base + idx * ptesize;
         }
 
-        if (riscv_feature(env, RISCV_FEATURE_PMP) &&
-            !pmp_hart_has_privs(env, pte_addr, sizeof(target_ulong),
-            1 << MMU_DATA_LOAD, PRV_S)) {
+        int pmp_prot;
+        int pmp_ret = get_physical_address_pmp(env, &pmp_prot, NULL, pte_addr,
+                                               sizeof(target_ulong),
+                                               MMU_DATA_LOAD, PRV_S);
+        if (pmp_ret != TRANSLATE_SUCCESS) {
             return TRANSLATE_PMP_FAIL;
         }
 
-#if defined(TARGET_RISCV32)
-        target_ulong pte = address_space_ldl(cs->as, pte_addr, attrs, &res);
-#elif defined(TARGET_RISCV64)
-        target_ulong pte = address_space_ldq(cs->as, pte_addr, attrs, &res);
-#endif
+        target_ulong pte;
+        if (riscv_cpu_is_32bit(env)) {
+            pte = address_space_ldl(cs->as, pte_addr, attrs, &res);
+        } else {
+            pte = address_space_ldq(cs->as, pte_addr, attrs, &res);
+        }
+
         if (res != MEMTX_OK) {
             qemu_log_mask(
                 CPU_LOG_MMU,
@@ -782,6 +836,22 @@ restart:
     return TRANSLATE_FAIL;
 }
 
+static void rvfi_dii_update_mem_addr(CPURISCVState *env,
+                                     MMUAccessType access_type, vaddr addr)
+{
+#if defined(CONFIG_RVFI_DII)
+    /*
+     * For non-ifetch, we log the mem_addr here to match sail which logs it
+     * for all accesses that go down to the physical level (i.e. the ones
+     * that passed CHERI and MMU checks) even if they fail then.
+     */
+    if (access_type != MMU_INST_FETCH) {
+        env->rvfi_dii_trace.MEM.rvfi_mem_addr = addr;
+        env->rvfi_dii_trace.available_fields |= RVFI_MEM_DATA;
+    }
+#endif
+}
+
 static void raise_mmu_exception(CPURISCVState *env, target_ulong address,
                                 MMUAccessType access_type, bool pmp_violation,
 #if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
@@ -842,7 +912,12 @@ static void raise_mmu_exception(CPURISCVState *env, target_ulong address,
     default:
         g_assert_not_reached();
     }
+    if (pmp_violation) {
+        /* CHERI and MMU checks passed, so we update mem_addr to match sail. */
+        rvfi_dii_update_mem_addr(env, access_type, address);
+    }
     env->badaddr = address;
+    env->two_stage_lookup = two_stage;
 }
 
 hwaddr riscv_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
@@ -879,11 +954,17 @@ void riscv_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
 
     if (access_type == MMU_DATA_STORE) {
         cs->exception_index = RISCV_EXCP_STORE_AMO_ACCESS_FAULT;
-    } else {
+    } else if (access_type == MMU_DATA_LOAD) {
         cs->exception_index = RISCV_EXCP_LOAD_ACCESS_FAULT;
+    } else {
+        cs->exception_index = RISCV_EXCP_INST_ACCESS_FAULT;
     }
 
     env->badaddr = addr;
+    env->two_stage_lookup = riscv_cpu_virt_enabled(env) ||
+                            riscv_cpu_two_stage_lookup(mmu_idx);
+    /* CHERI and MMU checks passed, so we update mem_addr to match sail. */
+    rvfi_dii_update_mem_addr(env, mmu_idx, addr);
     riscv_raise_exception(&cpu->env, cs->exception_index, retaddr);
 }
 
@@ -907,9 +988,11 @@ void riscv_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
         g_assert_not_reached();
     }
     env->badaddr = addr;
+    env->two_stage_lookup = riscv_cpu_virt_enabled(env) ||
+                            riscv_cpu_two_stage_lookup(mmu_idx);
     riscv_raise_exception(env, cs->exception_index, retaddr);
 }
-#endif
+#endif /* !CONFIG_USER_ONLY */
 
 #ifndef CONFIG_USER_ONLY
 static inline int rvfi_dii_check_addr(CPURISCVState *env, int ret, hwaddr *pa,
@@ -946,41 +1029,54 @@ static inline int rvfi_dii_check_addr(CPURISCVState *env, int ret, hwaddr *pa,
     return ret;
 }
 
-// Do all of riscv_cpu_tlb_fill() except for filling the TLB/raising a trap
-static int riscv_cpu_tlb_fill_impl(CPURISCVState *env, vaddr address, int size,
-                                   MMUAccessType access_type, int mmu_idx,
-                                   bool *pmp_violation, bool *first_stage_error,
-                                   int *prot, hwaddr *pa, uintptr_t retaddr)
+bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
+                        MMUAccessType access_type, int mmu_idx,
+                        bool probe, uintptr_t retaddr)
 {
+    RISCVCPU *cpu = RISCV_CPU(cs);
+    CPURISCVState *env = &cpu->env;
+#ifndef CONFIG_USER_ONLY
     vaddr im_address;
+    hwaddr pa = 0;
+    int prot, prot2, prot_pmp, prot_lc_preserve, prot_sc_preserve;
+    bool pmp_violation = false;
+    bool first_stage_error = true;
     bool two_stage_lookup = false;
-    int prot2;
     int ret = TRANSLATE_FAIL;
     int mode = mmu_idx;
+    /* default TLB page size */
+    target_ulong tlb_size = TARGET_PAGE_SIZE;
+
+#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
+    prot_lc_preserve = PAGE_LC_TRAP | PAGE_LC_CLEAR;
+    prot_sc_preserve = PAGE_SC_TRAP;
+#else
+    prot_lc_preserve = 0;
+    prot_sc_preserve = 0;
+#endif
 
     env->guest_phys_fault_addr = 0;
 
     qemu_log_mask(CPU_LOG_MMU, "%s ad %" VADDR_PRIx " rw %d mmu_idx %d\n",
                   __func__, address, access_type, mmu_idx);
 
-    if (mode == PRV_M && access_type != MMU_INST_FETCH) {
-        if (get_field(env->mstatus, MSTATUS_MPRV)) {
-            mode = get_field(env->mstatus, MSTATUS_MPP);
+    /* MPRV does not affect the virtual-machine load/store
+       instructions, HLV, HLVX, and HSV. */
+    if (riscv_cpu_two_stage_lookup(mmu_idx)) {
+        mode = get_field(env->hstatus, HSTATUS_SPVP);
+    } else if (mode == PRV_M && access_type != MMU_INST_FETCH &&
+               get_field(env->mstatus, MSTATUS_MPRV)) {
+        mode = get_field(env->mstatus, MSTATUS_MPP);
+        if (riscv_has_ext(env, RVH) && get_field(env->mstatus, MSTATUS_MPV)) {
+            two_stage_lookup = true;
         }
-    }
-
-    if (riscv_has_ext(env, RVH) && env->priv == PRV_M &&
-        access_type != MMU_INST_FETCH &&
-        get_field(env->mstatus, MSTATUS_MPRV) &&
-        get_field(env->mstatus, MSTATUS_MPV)) {
-        two_stage_lookup = true;
     }
 
     if (riscv_cpu_virt_enabled(env) ||
         ((riscv_cpu_two_stage_lookup(mmu_idx) || two_stage_lookup) &&
          access_type != MMU_INST_FETCH)) {
         /* Two stage lookup */
-        ret = get_physical_address(env, pa, prot, address,
+        ret = get_physical_address(env, &pa, &prot, address,
                                    &env->guest_phys_fault_addr, access_type,
                                    mmu_idx, true, true);
 
@@ -997,31 +1093,27 @@ static int riscv_cpu_tlb_fill_impl(CPURISCVState *env, vaddr address, int size,
         qemu_log_mask(CPU_LOG_MMU,
                       "%s 1st-stage address=%" VADDR_PRIx " ret %d physical "
                       TARGET_FMT_plx " prot %d\n",
-                      __func__, address, ret, *pa, *prot);
-        ret = rvfi_dii_check_addr(env, ret, pa, address, size, prot, access_type);
+                      __func__, address, ret, pa, prot);
+        ret = rvfi_dii_check_addr(env, ret, &pa, address, size, &prot, access_type);
 
         if (ret == TRANSLATE_SUCCESS) {
             /* Second stage lookup */
-            im_address = *pa;
+            im_address = pa;
 
-            ret = get_physical_address(env, pa, &prot2, im_address, NULL,
+            ret = get_physical_address(env, &pa, &prot2, im_address, NULL,
                                        access_type, mmu_idx, false, true);
 
             qemu_log_mask(CPU_LOG_MMU,
                     "%s 2nd-stage address=%" VADDR_PRIx " ret %d physical "
                     TARGET_FMT_plx " prot %d\n",
-                    __func__, im_address, ret, *pa, prot2);
+                    __func__, im_address, ret, pa, prot2);
 
-#if defined(TARGET_CHERI) && !defined(TARGET_RISCV32)
             /*
              * CHERI's load-side caveats are enforced only on the guest
              * tables at the moment.  Because we are about to AND the two
              * prot words together, *set* both caveats in prot2 so that
              * either bit will be preserved from prot.
-             */
-            prot2 |= PAGE_LC_TRAP | PAGE_LC_CLEAR;
-
-            /*
+             *
              * XXX Eventually we probably want to permit the hypervisor to be
              * able to force tag clearing or trapping.  That probably looks
              * something like this (but details are subject to change):
@@ -1041,15 +1133,19 @@ static int riscv_cpu_tlb_fill_impl(CPURISCVState *env, vaddr address, int size,
              * get_physical_address already handles the store-side CHERI
              * extensions.
              */
-#endif
-            *prot &= prot2;
+            prot &= prot2 | prot_lc_preserve;
 
-            if (riscv_feature(env, RISCV_FEATURE_PMP) &&
-                (ret == TRANSLATE_SUCCESS) &&
-                !pmp_hart_has_privs(env, *pa, size,
-                                    access_type_to_pmp_priv(access_type),
-                                    mode)) {
-                ret = TRANSLATE_PMP_FAIL;
+            if (ret == TRANSLATE_SUCCESS) {
+                ret = get_physical_address_pmp(env, &prot_pmp, &tlb_size, pa,
+                                               size, access_type, mode);
+
+                qemu_log_mask(CPU_LOG_MMU,
+                              "%s PMP address=" TARGET_FMT_plx " ret %d prot"
+                              " %d tlb_size " TARGET_FMT_lu "\n",
+                              __func__, pa, ret, prot_pmp, tlb_size);
+
+                /* PMP has no CHERI permissions; preserve trap/clear */
+                prot &= prot_pmp | prot_lc_preserve | prot_sc_preserve;
             }
 
             if (ret != TRANSLATE_SUCCESS) {
@@ -1057,7 +1153,7 @@ static int riscv_cpu_tlb_fill_impl(CPURISCVState *env, vaddr address, int size,
                  * Guest physical address translation failed, this is a HS
                  * level exception
                  */
-                *first_stage_error = false;
+                first_stage_error = false;
                 env->guest_phys_fault_addr = (im_address |
                                               (address &
                                                (TARGET_PAGE_SIZE - 1))) >> 2;
@@ -1065,70 +1161,40 @@ static int riscv_cpu_tlb_fill_impl(CPURISCVState *env, vaddr address, int size,
         }
     } else {
         /* Single stage lookup */
-        ret = get_physical_address(env, pa, prot, address, NULL,
+        ret = get_physical_address(env, &pa, &prot, address, NULL,
                                    access_type, mmu_idx, true, false);
-        ret = rvfi_dii_check_addr(env, ret, pa, address, size, prot, access_type);
+        ret = rvfi_dii_check_addr(env, ret, &pa, address, size, &prot, access_type);
 
         qemu_log_mask(CPU_LOG_MMU,
                       "%s address=%" VADDR_PRIx " ret %d physical "
                       TARGET_FMT_plx " prot %d\n",
-                      __func__, address, ret, *pa, *prot);
+                      __func__, address, ret, pa, prot);
+
+        if (ret == TRANSLATE_SUCCESS) {
+            ret = get_physical_address_pmp(env, &prot_pmp, &tlb_size, pa,
+                                           size, access_type, mode);
+
+            qemu_log_mask(CPU_LOG_MMU,
+                          "%s PMP address=" TARGET_FMT_plx " ret %d prot"
+                          " %d tlb_size " TARGET_FMT_lu "\n",
+                          __func__, pa, ret, prot_pmp, tlb_size);
+
+            /* PMP has no CHERI permissions; preserve trap/clear */
+            prot &= prot_pmp | prot_lc_preserve | prot_sc_preserve;
+        }
     }
 
-    if (riscv_feature(env, RISCV_FEATURE_PMP) &&
-        (ret == TRANSLATE_SUCCESS) &&
-        !pmp_hart_has_privs(env, *pa, size,
-                            access_type_to_pmp_priv(access_type), mode)) {
-        ret = TRANSLATE_PMP_FAIL;
-    }
     if (ret == TRANSLATE_PMP_FAIL) {
-        *pmp_violation = true;
+        pmp_violation = true;
     }
 
-#ifdef CONFIG_RVFI_DII
-    /*
-     * For non-ifetch, we log the mem_addr here to match sail which logs it
-     * for all accesses that go down to the physical level (i.e. the ones
-     * that passed CHERI and MMU checks).
-     */
-    if (access_type != MMU_INST_FETCH && ret != TRANSLATE_FAIL) {
-        env->rvfi_dii_trace.MEM.rvfi_mem_addr = address;
-        env->rvfi_dii_trace.available_fields |= RVFI_MEM_DATA;
-    }
-#endif
-    return ret;
-}
-#endif
-
-bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
-                        MMUAccessType access_type, int mmu_idx,
-                        bool probe, uintptr_t retaddr)
-{
-    RISCVCPU *cpu = RISCV_CPU(cs);
-    CPURISCVState *env = &cpu->env;
-#ifndef CONFIG_USER_ONLY
-    bool pmp_violation = false;
-    bool first_stage_error = true;
-    int prot = 0;
-    hwaddr pa = 0;
-    target_ulong tlb_size = 0;
-    int ret = riscv_cpu_tlb_fill_impl(env, address, size, access_type, mmu_idx,
-                                      &pmp_violation, &first_stage_error, &prot,
-                                      &pa, retaddr);
     if (ret == TRANSLATE_SUCCESS) {
         MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
 #ifdef TARGET_CHERI
         attrs.tag_setting = access_type == MMU_DATA_CAP_STORE;
 #endif
-        if (pmp_is_range_in_tlb(env, pa & TARGET_PAGE_MASK, &tlb_size)) {
-            tlb_set_page_with_attrs(cs, address & ~(tlb_size - 1),
-                                    pa & ~(tlb_size - 1), attrs, prot, mmu_idx,
-                                    tlb_size);
-        } else {
-            tlb_set_page_with_attrs(cs, address & TARGET_PAGE_MASK,
-                                    pa & TARGET_PAGE_MASK, attrs, prot, mmu_idx,
-                                    TARGET_PAGE_SIZE);
-        }
+        tlb_set_page_with_attrs(cs, address & ~(tlb_size - 1), pa & ~(tlb_size - 1),
+                                attrs, prot, mmu_idx, tlb_size);
         return true;
     } else if (probe) {
         return false;
@@ -1213,7 +1279,15 @@ void riscv_cpu_do_interrupt(CPUState *cs)
     target_ulong htval = 0;
     target_ulong mtval2 = 0;
 
-    bool log_inst = true;
+    if  (cause == RISCV_EXCP_SEMIHOST) {
+        if (env->priv >= PRV_S) {
+            gpr_set_int_value(env, xA0, do_common_semihosting(cs));
+            riscv_update_pc(env, PC_ADDR(env) + 4, /*can_be_unrepresentable=*/false);
+            return;
+        }
+        cause = RISCV_EXCP_BREAKPOINT;
+    }
+
     if (!async) {
         /* set tval to badaddr for traps with address information */
         switch (cause) {
@@ -1229,8 +1303,6 @@ void riscv_cpu_do_interrupt(CPUState *cs)
         case RISCV_EXCP_LOAD_CAP_PAGE_FAULT:
         case RISCV_EXCP_STORE_AMO_CAP_PAGE_FAULT:
 #endif
-            log_inst = false;
-            /* fallthrough */
         case RISCV_EXCP_INST_ADDR_MIS:
         case RISCV_EXCP_INST_ACCESS_FAULT:
         case RISCV_EXCP_LOAD_ADDR_MIS:
@@ -1282,37 +1354,13 @@ void riscv_cpu_do_interrupt(CPUState *cs)
                   __func__, env->mhartid, async, cause, PC_ADDR(env), tval,
                   riscv_cpu_get_trap_name(cause, async));
 
-    if (unlikely(log_inst && qemu_loglevel_mask(CPU_LOG_INT))) {
-        FILE* logf = qemu_log_lock();
-        qemu_log("Trap (%s) was probably caused by: ", riscv_cpu_get_trap_name(cause, async));
-#ifdef CONFIG_RVFI_DII
-        if (env->rvfi_dii_have_injected_insn) {
-            target_disas_buf(stderr, cs, &env->rvfi_dii_injected_insn,
-                             sizeof(env->rvfi_dii_injected_insn), PC_ADDR(env),
-                             1);
-        } else
-#endif
-        {
-            target_disas(logf, cs, PC_ADDR(env), /* Only one instr*/ -1);
-        }
-        qemu_log_unlock(logf);
-    }
-
     if (env->priv <= PRV_S &&
             cause < TARGET_LONG_BITS && ((deleg >> cause) & 1)) {
         /* handle the trap in S-mode */
         if (riscv_has_ext(env, RVH)) {
             target_ulong hdeleg = async ? env->hideleg : env->hedeleg;
-            bool two_stage_lookup = false;
 
-            if (env->priv == PRV_M ||
-                (env->priv == PRV_S && !riscv_cpu_virt_enabled(env)) ||
-                (env->priv == PRV_U && !riscv_cpu_virt_enabled(env) &&
-                    get_field(env->hstatus, HSTATUS_HU))) {
-                    two_stage_lookup = true;
-            }
-
-            if ((riscv_cpu_virt_enabled(env) || two_stage_lookup) && write_tval) {
+            if (env->two_stage_lookup && write_tval) {
                 /*
                  * If we are writing a guest virtual address to stval, set
                  * this to 1. If we are trapping to VS we will set this to 0
@@ -1350,10 +1398,7 @@ void riscv_cpu_do_interrupt(CPUState *cs)
                 riscv_cpu_set_force_hs_excep(env, 0);
             } else {
                 /* Trap into HS mode */
-                if (!two_stage_lookup) {
-                    env->hstatus = set_field(env->hstatus, HSTATUS_SPV,
-                                             riscv_cpu_virt_enabled(env));
-                }
+                env->hstatus = set_field(env->hstatus, HSTATUS_SPV, false);
                 htval = env->guest_phys_fault_addr;
             }
         }
@@ -1450,21 +1495,28 @@ void riscv_cpu_do_interrupt(CPUState *cs)
      * RISC-V ISA Specification.
      */
 
+    env->two_stage_lookup = false;
 #endif
     cs->exception_index = EXCP_NONE; /* mark handled to qemu */
 }
 
 #ifdef TARGET_CHERI
-void update_special_register_offset(CPURISCVState *env, cap_register_t *scr,
-                                    const char *name, target_ulong new_value)
+void update_special_register(CPURISCVState *env, cap_register_t *scr,
+                             const char *name, target_ulong new_value)
 {
-    // Any write to the CSR shall set the offset of the SCR to the value
-    // written. This shall be equivalent to a CSetOffset instruction, but with
-    // any exception condition instead just clearing the tag of the SCR.
-    target_ulong cursor = cap_get_cursor(scr);
-    target_ulong current_offset = cap_get_offset(scr);
-    target_ulong diff = new_value - current_offset;
-    target_ulong new_cursor = cursor + diff;
+    /* The new behaviour is that SCR updates affect the address. */
+    target_ulong new_cursor = new_value;
+    if (!CHERI_NO_RELOCATION(env)) {
+        /*
+         * Legacy behaviour: with relocation enabled, updates to the SCRs update
+         * the offset since updates to the architectural PC affect offset:
+         * This shall be equivalent to a CSetOffset instruction, but with any
+         * exception condition instead just clearing the tag of the SCR.
+         */
+        target_ulong current_offset = cap_get_offset(scr);
+        target_ulong diff = new_value - current_offset;
+        new_cursor = cap_get_cursor(scr) + diff;
+    }
 
     if (!cap_is_unsealed(scr)) {
         error_report("Attempting to modify sealed %s: " PRINT_CAP_FMTSTR "\r\n",

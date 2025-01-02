@@ -922,13 +922,21 @@ static inline void generate_clc(DisasContext *ctx, int32_t cd, int32_t cb,
         int32_t rt, int32_t offset, bool big_imm)
 {
     TCGv_i32 tcd = tcg_const_i32(cd);
-    TCGv_i32 tcb = tcg_const_i32(cb);
     TCGv toffset = tcg_temp_new();
     gen_load_gpr(toffset, rt);
     tcg_gen_addi_tl(toffset, toffset, clc_sign_extend(offset, big_imm) * 16);
-    gen_helper_load_cap_via_cap(cpu_env, tcd, tcb, toffset);
+    if (cb == 0) {
+        gen_helper_load_cap_via_ddc(cpu_env, tcd, toffset);
+    } else {
+        TCGv_i32 tcb = tcg_const_i32(cb);
+        TCGv taddr = tcg_temp_new();
+        gen_cap_get_cursor(ctx, cb, taddr);
+        tcg_gen_add_tl(taddr, taddr, toffset);
+        gen_helper_load_cap_via_cap(cpu_env, tcd, taddr, tcb);
+        tcg_temp_free(taddr);
+        tcg_temp_free_i32(tcb);
+    }
     tcg_temp_free(toffset);
-    tcg_temp_free_i32(tcb);
     tcg_temp_free_i32(tcd);
 }
 
@@ -945,14 +953,27 @@ static inline void generate_csc(DisasContext *ctx, int32_t cs, int32_t cb,
         int32_t rt, int32_t offset, bool big_imm)
 {
     TCGv_i32 tcs = tcg_const_i32(cs);
-    TCGv_i32 tcb = tcg_const_i32(cb);
     TCGv toffset = tcg_temp_new();
     gen_load_gpr(toffset, rt);
     tcg_gen_addi_tl(toffset, toffset, clc_sign_extend(offset, big_imm) * 16);
-    gen_helper_store_cap_via_cap(cpu_env, tcs, tcb, toffset);
+    /*
+     * CSC traps on cbp == NULL, so we use reg0 as $ddc to save encoding
+     * space and increase code density since storing relative to $ddc is common
+     * in the hybrid ABI (and also for backwards compat with old binaries).
+     */
+    if (cb == 0) {
+        gen_helper_store_cap_via_ddc(cpu_env, tcs, toffset);
+    } else {
+        TCGv_i32 tcb = tcg_const_i32(cb);
+        TCGv taddr = tcg_temp_new();
+        gen_cap_get_cursor(ctx, cb, taddr);
+        tcg_gen_add_tl(taddr, taddr, toffset);
+        gen_helper_store_cap_via_cap(cpu_env, tcs, taddr, tcb);
+        tcg_temp_free(taddr);
+        tcg_temp_free_i32(tcb);
+    }
     tcg_gen_movi_tl(cpu_lladdr, 1);
     tcg_temp_free(toffset);
-    tcg_temp_free_i32(tcb);
     tcg_temp_free_i32(tcs);
 }
 

@@ -21,11 +21,7 @@ TEST_CASE("Compressed NULL cap has canonical bounds", "[nullcap]") {
 
 // TODO: Implement non-stub sail_compress_common_mem/raw for Morello
 TEST_CASE("Compressed NULL cap encodes to zeroes", "[nullcap]") {
-    _cc_cap_t null_cap;
-    memset(&null_cap, 0, sizeof(null_cap));
-    _cc_N(update_otype)(&null_cap, _CC_N(OTYPE_UNSEALED));
-    null_cap._cr_top = _CC_N(NULL_TOP);
-    null_cap.cr_pesbt = _CC_N(NULL_PESBT);
+    _cc_cap_t null_cap = TestAPICC::make_null_derived_cap(0);
     auto pesbt = _cc_N(compress_mem)(&null_cap);
     auto pesbt_from_sail = _cc_sail_compress_mem(&null_cap);
     CHECK(pesbt == pesbt_from_sail);
@@ -72,41 +68,25 @@ static void check_representable(_cc_addr_t base, _cc_length_t length, _cc_addr_t
     // INFO("Length = " << length);
     // INFO("Expected to work = " << should_work);
     CAPTURE(base, length, should_work, ctx);
-    _cc_cap_t cap;
-    memset(&cap, 0, sizeof(cap));
-    cap.cr_base = base;
-    cap._cr_cursor = base + offset;
-    cap._cr_top = base + length;
-    cap.cr_tag = true;
     bool exact_input = false;
-    cap.cr_pesbt = _cc_N(compute_ebt)(cap.cr_base, cap._cr_top, NULL, &exact_input);
-    _cc_N(update_otype)(&cap, _CC_N(OTYPE_UNSEALED));
+    _cc_length_t top = base + length;
+    const _cc_addr_t compressed = _cc_N(compute_ebt)(base, top, nullptr, &exact_input);
     REQUIRE(exact_input == should_work);
-    _cc_addr_t compressed = _cc_N(compress_mem)(&cap);
+
     _cc_cap_t decompressed;
     memset(&decompressed, 0, sizeof(decompressed));
-
-    _cc_N(decompress_mem)(compressed, cap.cr_base + cap.offset(), cap.cr_tag, &decompressed);
-    CAPTURE(cap);
+    _cc_N(decompress_raw)(compressed, base + offset, false, &decompressed);
     CAPTURE(decompressed);
-    bool unsealed_roundtrip = cap.cr_base == decompressed.cr_base && cap.length() == decompressed.length() &&
-                              cap.offset() == decompressed.offset();
-    bool unsealed_representable = _cc_N(is_representable_cap_exact)(&cap);
-    CHECK(unsealed_representable == should_work);
-    CHECK(unsealed_roundtrip == unsealed_representable);
-    // TODO: CHECK(fast_representable == unsealed_representable);
-    auto cap_sealed = cap;
+    bool unsealed_roundtrip =
+        base == decompressed.cr_base && length == decompressed.length() && offset == decompressed.offset();
+    CHECK(unsealed_roundtrip == should_work);
+    _cc_cap_t cap_sealed;
+    _cc_N(decompress_raw)(compressed, base + offset, true, &cap_sealed);
     _cc_N(update_otype)(&cap_sealed, 5);
-    bool sealed_representable = _cc_N(is_representable_cap_exact)(&cap_sealed);
-    _cc_N(decompress_mem)(compressed, cap.cr_base + cap.offset(), cap.cr_tag, &decompressed);
-    bool sealed_roundtrip = cap.cr_base == decompressed.cr_base && cap.length() == decompressed.length() &&
-                            cap.offset() == decompressed.offset();
-    CHECK(sealed_representable == should_work);
-    CHECK(sealed_roundtrip == unsealed_representable);
-    // fprintf(stderr, "Base 0x%" PRIx64 " Len 0x%" PRIx64 "%016" PRIx64 ": roundtrip: sealed=%d, unsealed=%d -- Fast:
-    // sealed=%d, unsealed=%d\n",
-    //        base, (uint64_t)(length >> 64), (uint64_t)length, sealed_roundtrip, unsealed_roundtrip,
-    //        sealed_representable, unsealed_representable);
+    _cc_N(decompress_raw)(cap_sealed.cr_pesbt, base + offset, true, &cap_sealed);
+    bool sealed_roundtrip =
+        base == decompressed.cr_base && length == decompressed.length() && offset == decompressed.offset();
+    CHECK(sealed_roundtrip == unsealed_roundtrip);
 }
 
 static inline bool check_repr(bool sealed, _cc_addr_t base, _cc_addr_t length, _cc_addr_t offset) {
@@ -120,7 +100,6 @@ TEST_CASE("Check max size cap representable", "[representable]") {
     check_representable(0, _CC_N(MAX_ADDRESS_PLUS_ONE), 0, true, "MAX_ADDRESS_PLUS_ONE length");
     check_representable(0, 0, 0, true, "zero length");
     check_representable(0, _CC_N(MAX_ADDR), 0, false, "MAX_ADDR length");
-
     check_representable((_cc_addr_t)0xffffffffff000000, 0x00000000000ffffff, 0, false, "length with too many bits");
 }
 
@@ -220,4 +199,12 @@ TEST_CASE("Omnipotent cap representable", "") {
     checkFastRepCheckSucceeds(max_cap, 0x12345678);
     checkFastRepCheckSucceeds(max_cap, 1234);
     checkFastRepCheckSucceeds(max_cap, _CC_MAX_ADDR - 1234);
+}
+
+TEST_CASE("pesbt_is_correct ignores cr_extra", "") {
+    TestAPICC::cap_t null_cap = TestAPICC::make_null_derived_cap(0);
+    CHECK(_cc_N(pesbt_is_correct)(&null_cap));
+    // Changing cr_extra previously triggered assertions, check that it is ignored.
+    null_cap.cr_extra = 10;
+    CHECK(_cc_N(pesbt_is_correct)(&null_cap));
 }

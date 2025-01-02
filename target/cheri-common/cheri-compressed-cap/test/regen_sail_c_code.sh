@@ -34,6 +34,7 @@ keep_required_functions=(-c_preserve capToBits
 	-c_preserve getCapFlags
 	-c_preserve setCapPerms
 	-c_preserve capToString
+	-c_preserve doCSetBounds
 	-c_preserve getRepresentableLength
 	-c_preserve getRepresentableAlignmentMask)
 

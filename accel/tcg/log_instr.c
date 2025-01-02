@@ -639,6 +639,7 @@ static void do_instr_commit(CPUArchState *env)
 static void do_cpu_loglevel_switch(CPUState *cpu, run_on_cpu_data data)
 {
     CPUArchState *env = cpu->env_ptr;
+    tcg_debug_assert(env != NULL && "Called to early?");
     cpu_log_instr_state_t *cpulog = get_cpu_log_state(env);
     cpu_log_instr_info_t *iinfo = get_cpu_log_instr_info(env);
     qemu_log_instr_loglevel_t prev_level = cpulog->loglevel;

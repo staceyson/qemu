@@ -450,26 +450,25 @@ static QEMU_ALWAYS_INLINE target_ulong tag_offset_to_addr(TagOffset offset)
 }
 
 static void *cheri_tag_invalidate_one(CPUArchState *env, target_ulong vaddr,
-                                      uintptr_t pc, int mmu_idx);
+                                      int32_t size, uintptr_t pc, int mmu_idx);
 
 void *cheri_tag_invalidate_aligned(CPUArchState *env, target_ulong vaddr,
                                    uintptr_t pc, int mmu_idx)
 {
     cheri_debug_assert(QEMU_IS_ALIGNED(vaddr, CHERI_CAP_SIZE));
-    return cheri_tag_invalidate_one(env, vaddr, pc, mmu_idx);
+    return cheri_tag_invalidate_one(env, vaddr, CHERI_CAP_SIZE, pc, mmu_idx);
 }
 
 void cheri_tag_invalidate(CPUArchState *env, target_ulong vaddr, int32_t size,
                           uintptr_t pc, int mmu_idx)
 {
-    cheri_debug_assert(size > 0);
     target_ulong first_addr = vaddr;
     target_ulong last_addr = (vaddr + size - 1);
     TagOffset tag_start = addr_to_tag_offset(first_addr);
     TagOffset tag_end = addr_to_tag_offset(last_addr);
     if (likely(tag_start.value == tag_end.value)) {
         // Common case, only one tag (i.e. an aligned store)
-        cheri_tag_invalidate_one(env, vaddr, pc, mmu_idx);
+        cheri_tag_invalidate_one(env, vaddr, size, pc, mmu_idx);
         return;
     }
     // Unaligned store -> can cross a capabiblity alignment boundary and
@@ -503,22 +502,28 @@ void cheri_tag_invalidate(CPUArchState *env, target_ulong vaddr, int32_t size,
     exit(1);
 #endif
 #endif
-    for (target_ulong addr = tag_offset_to_addr(tag_start);
-         addr <= tag_offset_to_addr(tag_end); addr += CHERI_CAP_SIZE) {
-        cheri_tag_invalidate_one(env, addr, pc, mmu_idx);
+    target_ulong second_addr = tag_offset_to_addr(tag_start) + CHERI_CAP_SIZE;
+    cheri_tag_invalidate_one(env, first_addr, second_addr - first_addr, pc,
+                             mmu_idx);
+    for (target_ulong addr = second_addr; addr <= tag_offset_to_addr(tag_end);
+         addr += CHERI_CAP_SIZE) {
+        target_ulong inval_size = MIN(CHERI_CAP_SIZE, last_addr + 1 - addr);
+        cheri_tag_invalidate_one(env, addr, inval_size, pc, mmu_idx);
     }
 }
 
 static void *cheri_tag_invalidate_one(CPUArchState *env, target_ulong vaddr,
-                                      uintptr_t pc, int mmu_idx)
+                                      int32_t size, uintptr_t pc, int mmu_idx)
 {
+    cheri_debug_assert(size > 0);
+
     /*
      * When resolving this address in the TLB, treat it like a data store
      * (MMU_DATA_STORE) rather than a capability store (MMU_DATA_CAP_STORE),
      * so that we don't require that the SC inhibit be clear.
      */
 
-    void *host_addr = probe_write(env, vaddr, 1, mmu_idx, pc);
+    void *host_addr = probe_write(env, vaddr, size, mmu_idx, pc);
     // Only RAM and ROM regions are backed by host addresses so if
     // probe_write() returns NULL we know that we can't write the tagmem.
     if (unlikely(!host_addr)) {
@@ -631,7 +636,7 @@ void *cheri_tag_set(CPUArchState *env, target_ulong vaddr, int reg,
      */
     store_capcause_reg(env, reg);
     // Note: this probe will handle any store cap faults
-    void *host_addr = probe_cap_write(env, vaddr, 1, mmu_idx, pc);
+    void *host_addr = probe_cap_write(env, vaddr, CHERI_CAP_SIZE, mmu_idx, pc);
     clear_capcause_reg(env);
 
     handle_paddr_return(write);
@@ -679,7 +684,7 @@ bool cheri_tag_get(CPUArchState *env, target_ulong vaddr, int reg,
 {
 
     if (host_addr == NULL) {
-        host_addr = probe_read(env, vaddr, 1, mmu_idx, pc);
+        host_addr = probe_read(env, vaddr, CHERI_CAP_SIZE, mmu_idx, pc);
     }
     handle_paddr_return(read);
 
@@ -779,7 +784,11 @@ void cheri_tag_set_many(CPUArchState *env, uint32_t tags, target_ulong vaddr,
     cheri_debug_assert(!(tagmem_flags & TLBENTRYCAP_FLAG_CLEAR) &&
                        "Unimplemented");
 
-    cheri_debug_assert(!(tagmem_flags & TLBENTRYCAP_FLAG_TRAP));
+    /*
+     * TLBENTRYCAP_FLAG_TRAP prevents writing non-zero tags, and should have
+     * trapped in probe_cap_write().
+     */
+    assert(tags == 0 || !(tagmem_flags & TLBENTRYCAP_FLAG_TRAP));
 
     cheri_debug_assert(tagmem);
 

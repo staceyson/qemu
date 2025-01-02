@@ -33,7 +33,11 @@
 #include "cheri-archspecific-earlier.h"
 
 #define CHERI_CONTROLFLOW_CHECK_AT_TARGET 1
-#define CHERI_TAG_CLEAR_ON_INVALID        1
+#define CHERI_TAG_CLEAR_ON_INVALID(env)   1
+struct DisasContext;
+static inline bool cctlr_set(struct DisasContext *ctx, uint32_t bits);
+#define CHERI_TRANSLATE_DDC_RELOCATION(ctx) cctlr_set(ctx, CCTLR_DDCBO)
+#define CHERI_TRANSLATE_PCC_RELOCATION(ctx) cctlr_set(ctx, CCTLR_PCCBO)
 
 static inline const cap_register_t *cheri_get_ddc(CPUARMState *env)
 {

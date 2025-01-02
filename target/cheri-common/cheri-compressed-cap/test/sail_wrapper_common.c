@@ -143,7 +143,7 @@ static _cc_cap_t from_sail_cap(const lbits* sail_cap) {
     // Bounds (base and top) and exponent
     struct sail_bounds_tuple bounds;
     _CC_CONCAT(create_, sail_bounds_tuple)(&bounds);
-    _CC_CONCAT(MORELLO_SAIL_PREFIX, CapGetBounds)(&bounds, *sail_cap);
+    sailgen_CapGetBounds(&bounds, *sail_cap);
 
     check_length(bounds.ztup0, 65);
     check_length(bounds.ztup1, 65);
@@ -155,13 +155,13 @@ static _cc_cap_t from_sail_cap(const lbits* sail_cap) {
     _CC_CONCAT(kill_, sail_bounds_tuple)(&bounds);
 
     result.cr_bounds_valid = bounds.ztup2;
-    result.cr_exp = _CC_CONCAT(MORELLO_SAIL_PREFIX, CapGetExponent)(*sail_cap);
+    result.cr_exp = sailgen_CapGetExponent(*sail_cap);
 
     // Address including flag bits
-    result._cr_cursor = _CC_CONCAT(MORELLO_SAIL_PREFIX, CapGetValue)(*sail_cap);
-    _cc_N(update_perms)(&result, _CC_CONCAT(MORELLO_SAIL_PREFIX, CapGetPermissions)(*sail_cap));
-    _cc_N(update_otype)(&result, _CC_CONCAT(MORELLO_SAIL_PREFIX, CapGetObjectType)(*sail_cap));
-    result.cr_tag = _CC_CONCAT(MORELLO_SAIL_PREFIX, CapGetTag)(*sail_cap);
+    result._cr_cursor = sailgen_CapGetValue(*sail_cap);
+    _cc_N(update_perms)(&result, sailgen_CapGetPermissions(*sail_cap));
+    _cc_N(update_otype)(&result, sailgen_CapGetObjectType(*sail_cap));
+    result.cr_tag = sailgen_CapGetTag(*sail_cap);
 
     // Fix these extra fields not really present in sail
     _cc_N(update_reserved)(&result, 0);
@@ -333,15 +333,13 @@ _cc_addr_t _CC_CONCAT(sail_null_pesbt_, SAIL_WRAPPER_CC_FORMAT_LOWER)(void) {
     return null_pesbt;
 }
 
-bool _CC_CONCAT(sail_setbounds_, SAIL_WRAPPER_CC_FORMAT_LOWER)(_cc_cap_t* cap, _cc_addr_t req_base,
-                                                               _cc_length_t req_top) {
+bool _CC_CONCAT(sail_setbounds_, SAIL_WRAPPER_CC_FORMAT_LOWER)(_cc_cap_t* cap, _cc_length_t req_len) {
     struct zCapability sailcap = cap_t_to_sail_cap(cap);
-    sail_cap_bits sailtop;
-    CREATE(sail_cap_bits)(&sailtop);
-    cc_length_t_to_sail_cap_bits(&sailtop, req_top);
-    __typeof__(sailgen_setCapBounds(sailcap, req_base, sailtop)) result =
-        sailgen_setCapBounds(sailcap, req_base, sailtop);
-    KILL(sail_cap_bits)(&sailtop);
+    sail_cap_bits sail_req_len;
+    CREATE(sail_cap_bits)(&sail_req_len);
+    cc_length_t_to_sail_cap_bits(&sail_req_len, req_len);
+    __typeof__(sailgen_doCSetBounds(sailcap, sail_req_len)) result = sailgen_doCSetBounds(sailcap, sail_req_len);
+    KILL(sail_cap_bits)(&sail_req_len);
     bool exact = result.ztup0;
     *cap = sail_cap_to_cap_t(&result.ztup1);
     return exact;

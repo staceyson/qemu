@@ -21,6 +21,7 @@
 #include "cpu.h"
 #include "internal.h"
 #include "exec/gdbstub.h"
+#include "fpu_helper.h"
 #ifdef TARGET_CHERI
 #include "cheri-helper-utils.h"
 #endif
@@ -64,6 +65,16 @@ int mips_cpu_gdb_read_register(CPUState *cs, GByteArray *mem_buf, int n)
         // FIXME: should this be vaddr or offset for CHERI?
         return gdb_get_regl(mem_buf, PC_ADDR(env) |
                                      !!(env->hflags & MIPS_HFLAG_M16));
+    case 72:
+        return gdb_get_regl(mem_buf, 0); /* fp */
+    case 89:
+        return gdb_get_regl(mem_buf, (int32_t)env->CP0_PRid);
+    default:
+        if (n > 89) {
+            return 0;
+        }
+        /* 16 embedded regs.  */
+        return gdb_get_regl(mem_buf, 0);
     }
 
     return 0;
@@ -130,8 +141,10 @@ int mips_cpu_gdb_write_register(CPUState *cs, uint8_t *mem_buf, int n)
             env->hflags &= ~(MIPS_HFLAG_M16);
         }
         break;
+    case 72: /* fp, ignored */
+        break;
     default:
-        if (n > 72) {
+        if (n > 89) {
             return 0;
         }
         /* Other registers are readonly.  Ignore writes.  */
@@ -179,7 +192,7 @@ int mips_gdb_get_cheri_reg(CPUMIPSState *env, GByteArray *mem_buf, int n)
         return gdb_get_capreg(mem_buf, &env->active_tc.CHWR.DDC);
     case 33:
         return gdb_get_capreg(mem_buf, cheri_get_current_pcc(env));
-    case 34: 
+    case 34:
         return gdb_get_capreg(mem_buf, &env->active_tc.CHWR.UserTlsCap);
     case 35:
         return gdb_get_capreg(mem_buf, &env->active_tc.CHWR.PrivTlsCap);

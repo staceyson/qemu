@@ -30,9 +30,8 @@
 #include "tcg/tcg.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
-#include "hw/boards.h"
+#include "qemu/accel.h"
 #include "qapi/qapi-builtin-visit.h"
-#include "tcg-cpus.h"
 
 struct TCGState {
     AccelState parent_obj;
@@ -97,7 +96,7 @@ static void tcg_accel_instance_init(Object *obj)
     s->mttcg_enabled = default_mttcg_enabled();
 
     /* If debugging enabled, default "auto on", otherwise off. */
-#ifdef CONFIG_DEBUG_TCG
+#if defined(CONFIG_DEBUG_TCG) && !defined(CONFIG_USER_ONLY)
     s->splitwx_enabled = -1;
 #else
     s->splitwx_enabled = 0;
@@ -112,7 +111,16 @@ static int tcg_init(MachineState *ms)
 
     tcg_exec_init(s->tb_size * 1024 * 1024, s->splitwx_enabled);
     mttcg_enabled = s->mttcg_enabled;
-    cpus_register_accel(&tcg_cpus);
+
+    /*
+     * Initialize TCG regions only for softmmu.
+     *
+     * This needs to be done later for user mode, because the prologue
+     * generation needs to be delayed so that GUEST_BASE is already set.
+     */
+#ifndef CONFIG_USER_ONLY
+    tcg_region_init();
+#endif /* !CONFIG_USER_ONLY */
 
     return 0;
 }

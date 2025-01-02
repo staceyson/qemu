@@ -937,6 +937,10 @@ DEF_HELPER_FLAGS_5(neon_sqrdmulh_s, TCG_CALL_NO_RWG,
 #include "helper-sve.h"
 #endif
 
+#ifdef CONFIG_TCG_LOG_INSTR
+DEF_HELPER_FLAGS_3(arm_log_instr, TCG_CALL_NO_WG, void, env, tl, i32)
+#endif
+
 #ifdef TARGET_CHERI
 #include "helper-cheri.h"
 #endif

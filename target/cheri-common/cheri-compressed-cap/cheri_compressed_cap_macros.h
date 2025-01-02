@@ -43,6 +43,18 @@
 #endif
 #endif
 
+#if !defined(NDEBUG) && defined(__cplusplus) && defined(__EXCEPTIONS)
+#include <stdexcept>
+#define _cc_api_requirement(cond, msg)                                                                                 \
+    do {                                                                                                               \
+        if (!(cond)) {                                                                                                 \
+            throw std::invalid_argument(msg);                                                                          \
+        }                                                                                                              \
+    } while (false)
+#else
+#define _cc_api_requirement(cond, msg) _cc_debug_assert((cond) && msg)
+#endif
+
 #ifndef _CC_CONCAT
 #define _CC_CONCAT1(x, y) x##y
 #define _CC_CONCAT(x, y) _CC_CONCAT1(x, y)

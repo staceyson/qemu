@@ -56,7 +56,9 @@
 #define CHERI_REGNUM_IDC  26  /* Invoked Data Capability */
 #define CINVOKE_DATA_REGNUM CHERI_REGNUM_IDC
 #define CHERI_CONTROLFLOW_CHECK_AT_TARGET 0
-#define CHERI_TAG_CLEAR_ON_INVALID        0
+#define CHERI_TAG_CLEAR_ON_INVALID(env)   0
+#define CHERI_TRANSLATE_DDC_RELOCATION(ctx) 1
+#define CHERI_TRANSLATE_PCC_RELOCATION(ctx) 1
 
 /*
  * QEMU currently tells the kernel that there are no caches installed

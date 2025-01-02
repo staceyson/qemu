@@ -140,7 +140,7 @@ static inline target_ulong check_ddc(CPUArchState *env, uint32_t perm,
                                      uintptr_t retpc)
 {
     const cap_register_t *ddc = cheri_get_ddc(env);
-    target_ulong addr = ddc_offset + cap_get_cursor(ddc);
+    target_ulong addr = cheri_ddc_relative_addr(env, ddc_offset);
     check_cap(env, ddc, perm, addr, CHERI_EXC_REGNUM_DDC, len,
         /*instavail=*/true, retpc);
     return addr;
@@ -155,6 +155,15 @@ static inline void cheri_update_pcc_for_exc_handler(cap_register_t *pcc,
                                                     cap_register_t *src_cap,
                                                     target_ulong new_pc)
 {
+    if (cap_exactly_equal(pcc, src_cap) && new_pc == cap_get_cursor(pcc)) {
+        if (!pcc->cr_tag || !cap_has_perms(pcc, CAP_PERM_EXECUTE) ||
+            !cap_cursor_in_bounds(pcc)) {
+            /* Warn about infinite trap loops instead of silently freezing. */
+            error_report_once("Detected infinite trap loop due to invalid "
+                              "exception handler: " PRINT_CAP_FMTSTR "\r",
+                              PRINT_CAP_ARGS(pcc));
+        }
+    }
     *pcc = *src_cap;
     // FIXME: KCC must not be sealed
     if (!cap_is_unsealed(pcc)) {
@@ -162,6 +171,10 @@ static inline void cheri_update_pcc_for_exc_handler(cap_register_t *pcc,
                      " handler, detagging: " PRINT_CAP_FMTSTR "\r",
                      PRINT_CAP_ARGS(pcc));
         pcc->cr_tag = false;
+    }
+    if (!pcc->cr_tag) {
+        error_report("Invalid PCC in exception handler: " PRINT_CAP_FMTSTR "\r",
+                     PRINT_CAP_ARGS(pcc));
     }
     cheri_update_pcc(pcc, new_pc, /* can_be_unrep=*/true);
 }
@@ -239,17 +252,17 @@ static inline const char* cheri_cause_str(CheriCapExcCause cause) {
 }
 
 void store_cap_to_memory(CPUArchState *env, uint32_t cs, target_ulong vaddr,
-                         target_ulong retpc);
+                         uintptr_t retpc);
 void store_cap_memory_to_memory(CPUArchState *env, uint32_t cs, bool tag,
                                 target_ulong pesbt_for_mem, target_ulong cursor,
-                                target_ulong vaddr, target_ulong retpc);
+                                target_ulong vaddr, uintptr_t retpc);
 void store_cap_to_memory_mmu_index(CPUArchState *env, uint32_t cs,
-                                   target_ulong vaddr, target_ulong retpc,
+                                   target_ulong vaddr, uintptr_t retpc,
                                    int mmu_idx);
 
 void load_cap_from_memory(CPUArchState *env, uint32_t cd, uint32_t cb,
                           const cap_register_t *source, target_ulong vaddr,
-                          target_ulong retpc, hwaddr *physaddr);
+                          uintptr_t retpc, hwaddr *physaddr);
 
 static inline bool cap_is_local(CPUArchState *env, uint32_t cs)
 {
@@ -288,20 +301,11 @@ typedef void QEMU_NORETURN (*unaligned_memaccess_handler)(CPUArchState *env,
  * and dead required_perms checks were still being performed every time.
  * Adding QEMU_ALWAYS_INLINE seed up the boot from ~288s to ~278s.
  */
-static inline QEMU_ALWAYS_INLINE target_ulong
-cap_check_common_reg(uint32_t required_perms, CPUArchState *env, uint32_t cb,
-                     target_ulong offset, uint32_t size,
-                     uintptr_t _host_return_address, const cap_register_t *cbp,
-                     uint32_t alignment_required,
-                     unaligned_memaccess_handler unaligned_handler)
+static inline QEMU_ALWAYS_INLINE target_ulong cap_check_common_reg(
+    uint32_t required_perms, CPUArchState *env, uint32_t cb, target_ulong addr,
+    uint32_t size, uintptr_t _host_return_address, const cap_register_t *cbp,
+    uint32_t alignment_required, unaligned_memaccess_handler unaligned_handler)
 {
-    const target_ulong cursor = cap_get_cursor(cbp);
-#ifdef TARGET_AARCH64
-    const target_ulong addr = (target_long)offset;
-#else
-    const target_ulong addr = cursor + (target_long)offset;
-#endif
-
 #define MISSING_REQUIRED_PERM(X) ((required_perms & ~cap_get_perms(cbp)) & (X))
     // The check here is a little fiddly if this is a store and a load due to
     // priorities. For either loads or stores, permissions fault > bounds fault.
@@ -314,27 +318,27 @@ cap_check_common_reg(uint32_t required_perms, CPUArchState *env, uint32_t cb,
     bool in_bounds = cap_is_in_bounds(cbp, addr, size);
 
     if (!cbp->cr_tag) {
-        raise_cheri_exception_addr_wnr(env, CapEx_TagViolation, cb, offset,
+        raise_cheri_exception_addr_wnr(env, CapEx_TagViolation, cb, addr,
                                        !is_load);
     } else if (!cap_is_unsealed(cbp)) {
-        raise_cheri_exception_addr_wnr(env, CapEx_SealViolation, cb, offset,
+        raise_cheri_exception_addr_wnr(env, CapEx_SealViolation, cb, addr,
                                        !is_load);
     } else if (MISSING_REQUIRED_PERM(CAP_PERM_LOAD)) {
-        raise_cheri_exception_addr_wnr(env, CapEx_PermitLoadViolation, cb,
-                                       offset, false);
+        raise_cheri_exception_addr_wnr(env, CapEx_PermitLoadViolation, cb, addr,
+                                       false);
     } else if (MISSING_REQUIRED_PERM(CAP_PERM_LOAD_CAP)) {
         raise_cheri_exception_addr_wnr(env, CapEx_PermitLoadCapViolation, cb,
-                                       offset, false);
+                                       addr, false);
     } else if (!is_load || in_bounds) {
         if (MISSING_REQUIRED_PERM(CAP_PERM_STORE)) {
             raise_cheri_exception_addr_wnr(env, CapEx_PermitStoreViolation, cb,
-                                           offset, true);
+                                           addr, true);
         } else if (MISSING_REQUIRED_PERM(CAP_PERM_STORE_CAP)) {
             raise_cheri_exception_addr_wnr(env, CapEx_PermitStoreCapViolation,
-                                           cb, offset, true);
+                                           cb, addr, true);
         } else if (MISSING_REQUIRED_PERM(CAP_PERM_STORE_LOCAL)) {
             raise_cheri_exception_addr_wnr(
-                env, CapEx_PermitStoreLocalCapViolation, cb, offset, true);
+                env, CapEx_PermitStoreLocalCapViolation, cb, addr, true);
         }
     }
 #undef MISSING_REQUIRED_PERM
@@ -342,10 +346,10 @@ cap_check_common_reg(uint32_t required_perms, CPUArchState *env, uint32_t cb,
     if (!in_bounds) {
         qemu_log_instr_or_mask_msg(
             env, CPU_LOG_INT,
-            "Failed capability bounds check: offset=" TARGET_FMT_lx
-            " cursor=" TARGET_FMT_lx " addr=" TARGET_FMT_lx "\n",
-            offset, cursor, addr);
-        raise_cheri_exception_addr_wnr(env, CapEx_LengthViolation, cb, offset,
+            "Failed capability bounds check: addr=" TARGET_FMT_lx
+            " base=" TARGET_FMT_lx " top=" TARGET_FMT_lx "\n",
+            addr, cap_get_base(cbp), cap_get_top(cbp));
+        raise_cheri_exception_addr_wnr(env, CapEx_LengthViolation, cb, addr,
                                        !is_load);
     } else if (alignment_required &&
                !QEMU_IS_ALIGNED_P2(addr, alignment_required)) {
@@ -370,24 +374,29 @@ cap_check_common_reg(uint32_t required_perms, CPUArchState *env, uint32_t cb,
 bool load_cap_from_memory_raw(CPUArchState *env, target_ulong *pesbt,
                               target_ulong *cursor, uint32_t cb,
                               const cap_register_t *source, target_ulong vaddr,
-                              target_ulong retpc, hwaddr *physaddr);
+                              uintptr_t retpc, hwaddr *physaddr);
 bool load_cap_from_memory_raw_tag(CPUArchState *env, target_ulong *pesbt,
                                   target_ulong *cursor, uint32_t cb,
                                   const cap_register_t *source,
-                                  target_ulong vaddr, target_ulong retpc,
+                                  target_ulong vaddr, uintptr_t retpc,
                                   hwaddr *physaddr, bool *raw_tag);
 bool load_cap_from_memory_raw_tag_mmu_idx(
     CPUArchState *env, target_ulong *pesbt, target_ulong *cursor, uint32_t cb,
-    const cap_register_t *source, target_ulong vaddr, target_ulong retpc,
+    const cap_register_t *source, target_ulong vaddr, uintptr_t retpc,
     hwaddr *physaddr, bool *raw_tag, int mmu_idx);
 /* Useful for the load+branch capability helpers. */
 cap_register_t load_and_decompress_cap_from_memory_raw(
     CPUArchState *env, uint32_t cb, const cap_register_t *source,
-    target_ulong vaddr, target_ulong retpc, hwaddr *physaddr);
+    target_ulong vaddr, uintptr_t retpc, hwaddr *physaddr);
 
 void cheri_jump_and_link(CPUArchState *env, const cap_register_t *target,
                          target_ulong addr, uint32_t link_reg,
                          target_ulong link_pc, uint32_t cjalr_flags);
+void cheri_jump_and_link_checked(CPUArchState *env, uint32_t link_reg,
+                                 target_ulong link_pc, uint32_t target_reg,
+                                 const cap_register_t *target,
+                                 target_ulong target_addr, uint32_t flags,
+                                 uintptr_t _host_return_address);
 
 void squash_mutable_permissions(CPUArchState *env, target_ulong *pesbt,
                                 const cap_register_t *source);

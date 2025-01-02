@@ -196,7 +196,6 @@ static inline bool cap_is_sealed_with_reserved_otype(const cap_register_t *c)
 static inline bool cap_is_in_bounds(const cap_register_t *c, target_ulong addr,
                                     size_t num_bytes)
 {
-    cheri_debug_assert(num_bytes != 0);
 #ifdef TARGET_AARCH64
     // Invalid exponent caps are always considered out of bounds.
     if (!c->cr_bounds_valid)
@@ -205,16 +204,25 @@ static inline bool cap_is_in_bounds(const cap_register_t *c, target_ulong addr,
     if (addr < cap_get_base(c)) {
         return false;
     }
-    // Use __builtin_add_overflow to avoid wrapping around the end of the addres space
+    /*
+     * Use __builtin_add_overflow to detect avoid wrapping around the end of
+     * the address space. However, we have to be careful to allow accesses to
+     * the last byte (wrapping to exactly zero) since that is fine when
+     * checking against given an omnipotent capability.
+     */
     target_ulong access_end_addr = 0;
-    if (__builtin_add_overflow(addr, num_bytes, &access_end_addr)) {
+    if (unlikely(__builtin_add_overflow(addr, num_bytes, &access_end_addr))) {
+        /* Only do the extended precision addition if we do overflow. */
+        if (cap_get_top_full(c) >= (cap_length_t)addr + num_bytes) {
+            return true;
+        }
         if (c->cr_tag)
             warn_report("Found capability access that wraps around: 0x" TARGET_FMT_lx
                         " + %zd. Authorizing cap: " PRINT_CAP_FMTSTR,
                         addr, num_bytes, PRINT_CAP_ARGS(c));
         return false;
     }
-    if (access_end_addr > cap_get_top(c)) {
+    if (access_end_addr > cap_get_top_full(c)) {
         return false;
     }
     return true;
@@ -303,12 +311,7 @@ static inline void assert_valid_jump_target(const cap_register_t *target)
 
 static inline cap_register_t *null_capability(cap_register_t *cp)
 {
-    memset(cp, 0, sizeof(*cp)); // Set everything to zero including padding
-    cp->_cr_top = CAP_MAX_TOP;
-    cp->cr_pesbt = CAP_NULL_PESBT;
-    cheri_debug_assert(cap_is_representable(cp));
-    cp->cr_bounds_valid = 1;
-    cp->cr_exp = CAP_CC(NULL_EXP);
+    *cp = CAP_cc(make_null_derived_cap(0));
     cp->cr_extra = CREG_FULLY_DECOMPRESSED;
     return cp;
 }
@@ -359,18 +362,11 @@ static inline cap_register_t *cap_mark_unrepresentable(target_ulong addr,
     // Clear the tag and update the address:
     cr->_cr_cursor = addr;
     cr->cr_tag = false;
-#ifdef TARGET_AARCH64
-    // Morello never modifies pesbt if representability changes, instead bounds
-    // just change
+    /*
+     * Recompute the decompressed bounds relative to the new address. In most
+     * cases they will refer to a different region of memory now.
+     */
     CAP_cc(decompress_raw)(cr->cr_pesbt, addr, false, cr);
-#else
-    // re-compute the compressed representation to ensure we have the same
-    // resulting values for offset/base/top as the hardware:
-    // TODO: this could go away if we used a cap_register_t representation
-    // more like the hardware and sail.
-    target_ulong pesbt = CAP_cc(compress_raw)(cr);
-    CAP_cc(decompress_raw)(pesbt, addr, false, cr);
-#endif
     cr->cr_extra = CREG_FULLY_DECOMPRESSED;
     return cr;
 }

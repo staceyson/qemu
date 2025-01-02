@@ -4,6 +4,9 @@
 #include <cstring>
 
 #include "test_common.cpp"
+#include <catch2/matchers/catch_matchers_exception.hpp>
+
+using Catch::Matchers::Message;
 
 #if 0
 struct setbounds_regressions {
@@ -25,16 +28,33 @@ struct setbounds_regressions {
 template <typename Handler>
 static inline void check_csetbounds_invariants(const typename Handler::cap_t& initial_cap,
                                                const typename Handler::cap_t& with_bounds, bool was_exact,
-                                               _cc_addr_t requested_base, typename Handler::length_t requested_top) {
+                                               typename Handler::length_t requested_len) {
     CAPTURE(initial_cap, with_bounds, was_exact);
+    // Strip the high bits and sign extend to compute the requested base.
+    typename Handler::addr_t requested_base = _cc_N(cap_bounds_uses_value)(&initial_cap)
+                                                  ? _cc_N(cap_bounds_address)(initial_cap.address())
+                                                  : initial_cap.address();
+    typename Handler::length_t requested_top = requested_base + requested_len;
     // Address should be the same!
     REQUIRE(with_bounds.address() == initial_cap.address());
     if (was_exact) {
+#ifdef TEST_CC_IS_MORELLO
+        // For Morello the API could still report that the result was exact even if the bounds changed due to the high
+        // bits changing. Relax this check to only look at the lower 56 bits
+        REQUIRE(_cc_N(cap_bounds_address)(with_bounds.base()) == _cc_N(cap_bounds_address)(requested_base));
+        REQUIRE(_cc_N(cap_bounds_address)(with_bounds.top()) == _cc_N(cap_bounds_address)(requested_top));
+#else
         REQUIRE(with_bounds.base() == requested_base);
         REQUIRE(with_bounds.top() == requested_top);
+#endif
     } else {
-        REQUIRE(with_bounds.base() <= requested_base); // base must not be greater than what we asked for
-        REQUIRE(with_bounds.top() >= requested_top);   // top must not be less than what we asked for
+        // base must not be greater than what we asked for
+        REQUIRE(_cc_N(cap_bounds_address)(with_bounds.base()) <= _cc_N(cap_bounds_address)(requested_base));
+        if (requested_top > _CC_N(MAX_LENGTH)) {
+            REQUIRE(!with_bounds.cr_tag);
+        } else {
+            REQUIRE(with_bounds.top() >= requested_top); // top must not be less than what we asked for
+        }
         // At least one must be different otherwise was_exact is not correct
         REQUIRE((with_bounds.top() != requested_top || with_bounds.base() != requested_base));
     }
@@ -46,21 +66,21 @@ static inline void check_csetbounds_invariants(const typename Handler::cap_t& in
 }
 
 template <typename Handler>
-static typename Handler::cap_t do_csetbounds(const typename Handler::cap_t& initial_cap,
-                                             typename Handler::length_t requested_top, bool* was_exact) {
+static typename Handler::cap_t do_csetbounds(const typename Handler::cap_t& initial_cap, bool* was_exact,
+                                             typename Handler::length_t requested_len) {
     typename Handler::cap_t with_bounds = initial_cap;
     typename Handler::addr_t requested_base = initial_cap.address();
-    CAPTURE(initial_cap, requested_top, requested_base);
-    bool exact = Handler::setbounds(&with_bounds, requested_base, requested_top);
+    CAPTURE(initial_cap, requested_len, requested_base);
+    bool exact = Handler::setbounds(&with_bounds, requested_len);
     CAPTURE(with_bounds, exact);
 
     typename Handler::cap_t sail_with_bounds = initial_cap;
-    bool sail_exact = Handler::sail_setbounds(&sail_with_bounds, requested_base, requested_top);
+    bool sail_exact = Handler::sail_setbounds(&sail_with_bounds, requested_len);
     CAPTURE(sail_with_bounds, sail_exact);
 
     CHECK(sail_with_bounds == with_bounds);
     CHECK(sail_exact == exact);
-    check_csetbounds_invariants<Handler>(initial_cap, with_bounds, exact, requested_base, requested_top);
+    check_csetbounds_invariants<Handler>(initial_cap, with_bounds, exact, requested_len);
 
     // Check that the cr_pesbt is updated correctly and matches sail
     CHECK(with_bounds.cr_pesbt == Handler::compress_raw(with_bounds));
@@ -68,6 +88,10 @@ static typename Handler::cap_t do_csetbounds(const typename Handler::cap_t& init
     // Re-create the bounded capability and assert that the current pesbt values matches that one.
     if (with_bounds.cr_tag) {
         auto new_cap = Handler::make_max_perms_cap(with_bounds.base(), with_bounds.address(), with_bounds.top());
+        // Update permissions, type, etc. by masking everything except the bounds bits.
+        auto ebt = new_cap.cr_pesbt & _CC_N(FIELD_EBT_MASK64);
+        new_cap.cr_pesbt = with_bounds.cr_pesbt;
+        _cc_N(update_ebt)(&new_cap, ebt);
         CHECK(new_cap == with_bounds);
         CHECK(new_cap.cr_pesbt == with_bounds.cr_pesbt);
         CHECK(new_cap.cr_pesbt == Handler::compress_raw(with_bounds));
@@ -82,9 +106,8 @@ static typename Handler::cap_t do_csetbounds(const typename Handler::cap_t& init
 template <typename Handler>
 static _cc_cap_t check_bounds_exact(const typename Handler::cap_t& initial_cap,
                                     typename Handler::length_t requested_length, bool should_be_exact) {
-    typename Handler::length_t req_top = initial_cap.address() + (typename Handler::length_t)requested_length;
     bool exact = false;
-    _cc_cap_t with_bounds = do_csetbounds<Handler>(initial_cap, req_top, &exact);
+    _cc_cap_t with_bounds = do_csetbounds<Handler>(initial_cap, &exact, requested_length);
     CHECK(exact == should_be_exact);
     return with_bounds;
 }
@@ -110,12 +133,12 @@ static inline void check_cram_matches_setbounds(_cc_length_t req_top, const _cc_
 }
 
 template <typename Handler>
-void test_zero_length_one_past_end() { // Create an out-of-bounds capability and set length to one
+void test_zero_length_one_past_end() { // Create an out-of-bounds capability and set length to zero
     constexpr unsigned base = 12345;
     constexpr unsigned base_plus_one = base + 1;
     auto one_past_end = Handler::make_max_perms_cap(base, base_plus_one, base_plus_one);
     bool exact;
-    auto result = do_csetbounds<Handler>(one_past_end, base_plus_one, &exact);
+    auto result = do_csetbounds<Handler>(one_past_end, &exact, 0);
     CHECK(result.base() == base_plus_one);
     CHECK(result.top() == base_plus_one);
     CHECK(result.address() == base_plus_one);
@@ -123,7 +146,7 @@ void test_zero_length_one_past_end() { // Create an out-of-bounds capability and
     CHECK(exact);
     // Check that calling setbounds with the same target top yields the same result
     bool same_again_exact = false;
-    auto same_again = do_csetbounds<Handler>(result, base_plus_one, &same_again_exact);
+    auto same_again = do_csetbounds<Handler>(result, &same_again_exact, 0);
     CHECK(result == same_again);
 }
 
@@ -140,7 +163,7 @@ TEST_CASE("setbounds test cases from sail", "[bounds]") {
         REQUIRE(first_input.base() == 0);
         REQUIRE(first_input.top() == _CC_MAX_TOP);
         bool first_exact = false;
-        const _cc_cap_t first_bounds = do_csetbounds<Handler>(first_input, input.top1, &first_exact);
+        const _cc_cap_t first_bounds = do_csetbounds<Handler>(first_input, &first_exact, input.len1());
         CHECK(first_bounds.base() == input.sail_cc_base1);
         CHECK(first_bounds.top() == input.sail_cc_top1);
         // Check CRAP/CRAM:
@@ -148,7 +171,7 @@ TEST_CASE("setbounds test cases from sail", "[bounds]") {
 
         // Check that calling setbounds with the same target top yields the same result
         bool first_again_exact = false;
-        const _cc_cap_t first_bounds_again = do_csetbounds<Handler>(first_bounds, input.top1, &first_again_exact);
+        const _cc_cap_t first_bounds_again = do_csetbounds<Handler>(first_bounds, &first_again_exact, input.len1());
         CHECK(first_again_exact == first_exact);
         CHECK(first_bounds.base() == first_bounds_again.base());
         CHECK(first_bounds.top() == first_bounds_again.top());
@@ -161,7 +184,7 @@ TEST_CASE("setbounds test cases from sail", "[bounds]") {
         second_input._cr_cursor += input.base2 - second_input.address();
         REQUIRE(second_input.address() == input.base2);
         bool second_exact = false;
-        const _cc_cap_t second_bounds = do_csetbounds<Handler>(second_input, input.top2, &second_exact);
+        const _cc_cap_t second_bounds = do_csetbounds<Handler>(second_input, &second_exact, input.len2());
         CHECK(second_bounds.base() == input.sail_cc_base2);
         CHECK(second_bounds.top() == input.sail_cc_top2);
         // Check CRAP/CRAM:
@@ -173,7 +196,7 @@ TEST_CASE("setbounds test cases from sail", "[bounds]") {
         }
         // Check that calling setbounds with the same target top yields the same result
         bool second_again_exact = false;
-        const _cc_cap_t second_bounds_again = do_csetbounds<Handler>(second_bounds, input.top2, &second_again_exact);
+        const _cc_cap_t second_bounds_again = do_csetbounds<Handler>(second_bounds, &second_again_exact, input.len2());
         CHECK(second_again_exact == second_exact);
         CHECK(second_bounds.base() == second_bounds_again.base());
         CHECK(second_bounds.top() == second_bounds_again.top());
@@ -182,3 +205,147 @@ TEST_CASE("setbounds test cases from sail", "[bounds]") {
     }
 }
 #endif
+
+TEST_CASE("Setbounds API misuse", "[regression]") {
+    // QEMU was not detagging capabilities correctly (found running tests/cp2/test_cp2_x_csetboundsexact_length.s)
+    // Calling csetboundsexact on a zero-length capability should have trapped for MIPS
+    auto cap = TestAPICC::make_max_perms_cap(0x0000000000103060, 0x0000000000103060, 0x0000000000103060);
+    CHECK(cap.cr_tag);
+    // Calling setbounds with a value > length should detag
+    // NB: Calling checked_setbounds directly with such a value will raise an exception in debug mode.
+    auto with_bounds_greater_top = cap;
+    bool exact = _cc_N(setbounds)(&with_bounds_greater_top, 8);
+    CHECK(exact);
+    CHECK(!with_bounds_greater_top.cr_tag);
+    CHECK(with_bounds_greater_top.address() == cap.address());
+    CHECK(with_bounds_greater_top.base() == cap.base());
+    CHECK(with_bounds_greater_top.top() == cap.top() + 8);
+#ifndef NDEBUG
+    CHECK_THROWS_MATCHES(_cc_N(checked_setbounds)(&cap, 8), std::invalid_argument,
+                         Message("cannot increase top on tagged capabilities"));
+#endif
+}
+
+TEST_CASE("Setbounds API misuse (creating larger cap)", "[regression]") {
+    // root@cheribsd-morello-purecap:~ # /bin/cheribsdtest-mt-c18n -a -x
+    // qemu-system-morello: ../../qemu/target/cheri-common/cheri-compressed-cap/cheri_compressed_cap_common.h:833:
+    // _Bool cc128m_setbounds(cc128m_cap_t *, cc128m_length_t): Assertion `(req_top <= cap->_cr_top) &&
+    //     "cannot increase top on tagged capabilities"' failed.
+    TestAPICC::cap_t cap = TestAPICC::make_max_perms_cap(/*base=*/0x00000000401bd000, /*cursor=*/0x00000000401bdfe0,
+                                                         /*top=*/0x00000000401be000);
+    uint64_t req_len = 0xc0;
+    CHECK(cap.base() == 0x00000000401bd000);
+    CHECK(cap.top() == 0x00000000401be000);
+    // Capabilities that end up being larger than the input should be detagged by the caller.
+#ifndef NDEBUG
+    CHECK_THROWS_MATCHES(_cc_N(checked_setbounds)(&cap, req_len), std::invalid_argument,
+                         Message("cannot increase top on tagged capabilities"));
+#endif
+    TestAPICC::cap_t cap2 = cap;
+    CHECK(cap2.cr_tag);
+    bool was_exact = _cc_N(setbounds)(&cap2, req_len);
+    CHECK(was_exact);
+    CHECK(!cap2.cr_tag);
+    CHECK(cap2.base() == 0x00000000401bdfe0);
+    CHECK(cap2.top() == cap2.base() + req_len);
+}
+
+TEST_CASE("Setbounds detag sealed inputs", "[regression]") {
+    // Calling setbounds on a sealed input did not de-tag the result, triggering an assertion
+    TestAPICC::cap_t cap = TestAPICC::make_max_perms_cap(/*base=*/0, /*cursor=*/16, /*top=*/_CC_MAX_TOP);
+    _cc_N(update_otype(&cap, _CC_N(OTYPE_SENTRY)));
+    CHECK(cap.is_sealed());
+    uint64_t req_len = 0x20;
+#ifndef NDEBUG
+    // Sealed, tagged input capabilities should be rejected.
+    CHECK_THROWS_MATCHES(_cc_N(checked_setbounds)(&cap, req_len), std::invalid_argument,
+                         Message("cannot be used on tagged sealed capabilities"));
+#endif
+    TestAPICC::cap_t cap2 = cap;
+    CHECK(cap2.cr_tag);
+    bool was_exact = _cc_N(setbounds)(&cap2, req_len);
+    CHECK(was_exact);
+    CHECK(!cap2.cr_tag);
+    CHECK(cap2.base() == 16);
+    CHECK(cap2.top() == cap2.base() + req_len);
+}
+
+TEST_CASE("Setbounds length overflow", "[fuzz]") {
+    // Calling setbounds with cursor+length overflowing previously resulted in an assertion
+    TestAPICC::cap_t cap = TestAPICC::make_max_perms_cap(/*base=*/0, /*cursor=*/_CC_MAX_ADDR, /*top=*/_CC_MAX_TOP);
+    TestAPICC::addr_t req_len = _CC_MAX_ADDR;
+#ifndef NDEBUG
+    // Overflowing cursor+base should be rejected.
+    CHECK_THROWS_MATCHES(_cc_N(checked_setbounds)(&cap, req_len), std::invalid_argument,
+                         Message("cannot increase top on tagged capabilities"));
+#endif
+    bool was_exact;
+    // The result should be detagged since we are setting bounds beyond top.
+    TestAPICC::cap_t result = do_csetbounds<TestAPICC>(cap, &was_exact, req_len);
+    CHECK(!was_exact);
+    CHECK(!result.cr_tag);
+    CHECK(result.base() < _CC_MAX_ADDR);
+    CHECK(result.top() == 0);
+}
+
+TEST_CASE("Setbounds base reduction", "[fuzz]") {
+    // Calling setbounds that reduces the base should detag and not assert
+    TestAPICC::cap_t cap = TestAPICC::make_max_perms_cap(/*base=*/8, /*cursor=*/2, /*top=*/11);
+    TestAPICC::addr_t req_len = 1;
+#ifndef NDEBUG
+    // Overflowing cursor+base should be rejected.
+    CHECK_THROWS_MATCHES(_cc_N(checked_setbounds)(&cap, req_len), std::invalid_argument,
+                         Message("cannot decrease base on tagged capabilities"));
+#endif
+    // The result should be detagged since we are setting bounds to start at less than base top.
+    bool was_exact;
+    TestAPICC::cap_t result = do_csetbounds<TestAPICC>(cap, &was_exact, req_len);
+    CHECK(!result.cr_tag);
+    CHECK(was_exact);
+    CHECK(result.base() == 2);
+    CHECK(result.address() == 2);
+    CHECK(result.top() == result.base() + req_len);
+}
+
+TEST_CASE("Setbounds top greater max", "[fuzz]") {
+    // Calling setbounds with a non-derivable capability that happened to have a valid tag should not trigger asserts
+    // even though such a capability should never be encountered during normal operation.
+    TestAPICC::cap_t cap = TestAPICC::make_null_derived_cap(_CC_MAX_ADDR);
+    bool exact_input = false;
+    // Increase top beyond end of addres space
+    cap._cr_top = _CC_MAX_TOP | (_CC_MAX_TOP >> 1);
+    _cc_N(update_ebt)(&cap, _cc_N(compute_ebt)(cap.cr_base, cap._cr_top, nullptr, &exact_input));
+    REQUIRE(exact_input);
+    REQUIRE(_cc_N(is_representable_cap_exact)(&cap));
+    // Set the tag bit to create an underivable capability (e.g. Morello's SetTag instruction)
+    cap.cr_tag = 1;
+    TestAPICC::addr_t req_len = 2;
+#ifndef NDEBUG
+    // Top > MAX_TOP should be rejected.
+    CHECK_THROWS_MATCHES(_cc_N(checked_setbounds)(&cap, req_len), std::invalid_argument,
+                         Message("new top must be smaller than max length"));
+#endif
+    bool was_exact;
+    TestAPICC::cap_t result = do_csetbounds<TestAPICC>(cap, &was_exact, req_len);
+    // Ideally the result should be detagged since we are setting bounds to start beyond MAX_TOP,
+    // but this is not the behaviour of existing hardware.
+    CHECK(result.cr_tag);
+    CHECK(was_exact);
+    CHECK(result.base() == _CC_MAX_ADDR);
+    CHECK(result.address() == _CC_MAX_ADDR);
+    CHECK(result.top() == (_CC_MAX_TOP | 1)); // New top should overflow
+
+#ifndef NDEBUG
+    // Top > MAX_TOP should be rejected.
+    CHECK_THROWS_MATCHES(_cc_N(checked_setbounds)(&cap, 0), std::invalid_argument,
+                         Message("input capability top must be less than max top"));
+#endif
+    result = do_csetbounds<TestAPICC>(cap, &was_exact, 0);
+    // Ideally the result should be detagged since the input was underivable,
+    // but this is not the behaviour of existing hardware.
+    CHECK(result.cr_tag);
+    CHECK(was_exact);
+    CHECK(result.base() == _CC_MAX_ADDR);
+    CHECK(result.address() == _CC_MAX_ADDR);
+    CHECK(result.top() == _CC_MAX_ADDR);
+}

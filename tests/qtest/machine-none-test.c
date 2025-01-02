@@ -39,7 +39,9 @@ static struct arch2cpu cpus_map[] = {
     { "mips", "4Kc" },
     { "mipsel", "I7200" },
     { "mips64", "20Kc" },
+    { "mips64cheri128", "BERI" },
     { "mips64el", "I6500" },
+    { "morello", "morello" },
     { "moxie", "MoxieLite" },
     { "nios2", "FIXME" },
     { "or1k", "or1200" },
@@ -56,7 +58,9 @@ static struct arch2cpu cpus_map[] = {
     { "xtensaeb", "fsf" },
     { "hppa", "hppa" },
     { "riscv64", "rv64" },
+    { "riscv64cheri", "rv64" },
     { "riscv32", "rv32" },
+    { "riscv32cheri", "rv32" },
     { "rx", "rx62n" },
 };
 

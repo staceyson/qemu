@@ -1,0 +1,6 @@
+# Add a new line containing a larger number than the last (e.g. YYYYMMDD) for
+# every change that breaks incremental builds for some reason.
+
+# https://github.com/CTSRD-CHERI/qemu/commit/56c3469a6d63c64fbe966af302de306e82cd5b6a
+# https://github.com/CTSRD-CHERI/qemu/commit/514635ea947fd44122fa9130782b5fc63873d2f6
+20230717  # CGetHigh and CSetHigh added, meson does not track dependencies correctly so we need a full rebuild

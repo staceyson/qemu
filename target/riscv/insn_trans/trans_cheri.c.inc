@@ -70,16 +70,24 @@ static inline bool gen_cheri_cap_cap(int cd, int cs,
     DO_TRANSLATE(name, gen_cheri_cap_cap, a->rd, a->rs1)
 
 typedef void(cheri_cap_int_helper)(TCGv_env, TCGv_i32, TCGv);
-static inline bool gen_cheri_cap_int(int cd, int rs,
-                                     cheri_cap_int_helper *gen_func)
+static inline QEMU_ALWAYS_INLINE bool
+gen_cheri_cap_int_plus_imm(int cd, int rs, target_long imm,
+                           cheri_cap_int_helper *gen_func)
 {
     TCGv_i32 dest_regnum = tcg_const_i32(cd);
     TCGv gpr_value = tcg_temp_new();
     gen_get_gpr(gpr_value, rs);
+    tcg_gen_addi_tl(gpr_value, gpr_value, imm);
     gen_func(cpu_env, dest_regnum, gpr_value);
     tcg_temp_free(gpr_value);
     tcg_temp_free_i32(dest_regnum);
     return true;
+}
+
+static inline bool gen_cheri_cap_int(int cd, int rs,
+                                     cheri_cap_int_helper *gen_func)
+{
+    return gen_cheri_cap_int_plus_imm(cd, rs, 0, gen_func);
 }
 
 typedef void(cheri_int_int_helper)(TCGv, TCGv_env, TCGv);
@@ -114,9 +122,9 @@ static inline bool gen_cheri_cap_cap_cap(int cd, int cs1, int cs2,
     DO_TRANSLATE(name, gen_cheri_cap_cap_cap, a->rd, a->rs1, a->rs2)
 
 typedef void(cheri_cap_cap_int_helper)(TCGv_env, TCGv_i32, TCGv_i32, TCGv);
-static inline bool gen_cheri_cap_cap_int_imm(int cd, int cs1, int rs2,
-                                             target_long imm,
-                                             cheri_cap_cap_int_helper *gen_func)
+static inline bool
+gen_cheri_cap_cap_int_plus_imm(int cd, int cs1, int rs2, target_long imm,
+                               cheri_cap_cap_int_helper *gen_func)
 {
     TCGv_i32 dest_regnum = tcg_const_i32(cd);
     TCGv_i32 source_regnum = tcg_const_i32(cs1);
@@ -132,7 +140,26 @@ static inline bool gen_cheri_cap_cap_int_imm(int cd, int cs1, int rs2,
     return true;
 }
 #define TRANSLATE_CAP_CAP_INT(name)                                            \
-    DO_TRANSLATE(name, gen_cheri_cap_cap_int_imm, a->rd, a->rs1, a->rs2, 0)
+    DO_TRANSLATE(name, gen_cheri_cap_cap_int_plus_imm, a->rd, a->rs1, a->rs2, 0)
+
+typedef void(cheri_cap_loadstore_helper)(TCGv_env, TCGv_i32, TCGv, TCGv_i32);
+static inline bool gen_cheri_cap_loadstore(DisasContext *ctx, int srcdst,
+                                           int auth, target_long imm,
+                                           cheri_cap_loadstore_helper *gen_func)
+{
+    TCGv_i32 srcdest_regnum = tcg_const_i32(srcdst);
+    TCGv_i32 auth_regnum = tcg_const_i32(auth);
+    TCGv addr = tcg_temp_new();
+    gen_cap_get_cursor(ctx, auth, addr);
+    if (imm != 0) {
+        tcg_gen_addi_tl(addr, addr, imm);
+    }
+    gen_func(cpu_env, srcdest_regnum, addr, auth_regnum);
+    tcg_temp_free(addr);
+    tcg_temp_free_i32(auth_regnum);
+    tcg_temp_free_i32(srcdest_regnum);
+    return true;
+}
 
 typedef void(cheri_int_cap_cap_helper)(TCGv, TCGv_env, TCGv_i32, TCGv_i32);
 static inline bool gen_cheri_int_cap_cap(DisasContext *ctx, int rd, int cs1,
@@ -157,6 +184,7 @@ static inline bool gen_cheri_int_cap_cap(DisasContext *ctx, int rd, int cs1,
 TRANSLATE_INT_CAP(cgetaddr)
 TRANSLATE_INT_CAP(cgetbase)
 TRANSLATE_INT_CAP(cgetflags)
+TRANSLATE_INT_CAP(cgethigh)
 TRANSLATE_INT_CAP(cgetlen)
 TRANSLATE_INT_CAP(cgetoffset)
 TRANSLATE_INT_CAP(cgetperm)
@@ -213,6 +241,7 @@ TRANSLATE_CAP_CAP_INT(csetaddr)
 TRANSLATE_CAP_CAP_INT(csetbounds)
 TRANSLATE_CAP_CAP_INT(csetboundsexact)
 TRANSLATE_CAP_CAP_INT(csetflags)
+TRANSLATE_CAP_CAP_INT(csethigh)
 TRANSLATE_CAP_CAP_INT(csetoffset)
 
 // Three operand (int cap cap)
@@ -252,23 +281,25 @@ static bool trans_csetboundsimm(DisasContext *ctx, arg_cincoffsetimm *a)
 /// Control-flow instructions
 static void gen_cjal(DisasContext *ctx, int rd, target_ulong imm)
 {
-    target_ulong next_pc;
+    /* Mask the LSB to match the RISC-V spec for JAL. */
+    target_ulong next_pc = (ctx->base.pc_next + imm) & ~(target_ulong)1;
 
-    /* check misaligned: */
-    next_pc = ctx->base.pc_next + imm;
-    if (!has_ext(ctx, RVC)) {
-        if ((next_pc & 0x3) != 0) {
-            gen_exception_inst_addr_mis(ctx);
-            return;
-        }
-    }
     TCGv_i32 dst = tcg_const_i32(rd);
-    TCGv new_cursor = tcg_const_tl(ctx->pc_succ_insn);
-    gen_helper_auipcc(cpu_env, dst, new_cursor);
-    tcg_temp_free(new_cursor);
+    TCGv target_addr = tcg_const_tl(next_pc);
+    TCGv immv = tcg_const_tl(imm);
+    TCGv link_addr = tcg_const_tl(ctx->pc_succ_insn);
+    /*
+     * helper_cjal() checks for misalignment and capability bounds. It also
+     * ensures that the written value is a sentry and marks PC as up-to-date.
+     */
+    gen_helper_cjal(cpu_env, dst, target_addr, link_addr);
+    tcg_temp_free(link_addr);
+    tcg_temp_free(immv);
+    tcg_temp_free(target_addr);
     tcg_temp_free_i32(dst);
 
-    gen_goto_tb(ctx, 0, ctx->base.pc_next + imm, /*bounds_check=*/true); /* must use this for safety */
+    /* No bounds check needed here since we did it in helper_cjal(). */
+    gen_goto_tb(ctx, 0, next_pc, false);
     ctx->base.is_jmp = DISAS_NORETURN;
 }
 
@@ -375,26 +406,26 @@ TRANSLATE_EXPLICIT_LOAD(ld_wu, MO_UL)
 static inline bool trans_ld_c_ddc(DisasContext *ctx, arg_ld_c_ddc *a)
 {
     // always uses DDC as the base register
-    return gen_cheri_cap_cap_int_imm(a->rd, CHERI_EXC_REGNUM_DDC, a->rs1, 0,
-                                     &gen_helper_load_cap_via_cap);
+    return gen_cheri_cap_int_plus_imm(a->rd, a->rs1, 0,
+                                      &gen_helper_load_cap_via_ddc);
 }
 
 static inline bool trans_ld_c_cap(DisasContext *ctx, arg_ld_c_cap *a)
 {
     // No immediate available for lccap
-    return gen_cheri_cap_cap_imm(a->rd, a->rs1, 0,
-                                 &gen_helper_load_cap_via_cap);
+    return gen_cheri_cap_loadstore(ctx, a->rd, a->rs1, 0,
+                                   &gen_helper_load_cap_via_cap);
 }
 
 static inline bool trans_lc(DisasContext *ctx, arg_lc *a)
 {
     if (!ctx->capmode) {
         // Without capmode we load relative to DDC (lc instructions)
-        return gen_cheri_cap_cap_int_imm(a->rd, CHERI_EXC_REGNUM_DDC, a->rs1,
-                                         a->imm, &gen_helper_load_cap_via_cap);
+        return gen_cheri_cap_int_plus_imm(a->rd, a->rs1, a->imm,
+                                          &gen_helper_load_cap_via_ddc);
     }
-    return gen_cheri_cap_cap_imm(a->rd, a->rs1, /*offset=*/a->imm,
-                                 &gen_helper_load_cap_via_cap);
+    return gen_cheri_cap_loadstore(ctx, a->rd, a->rs1, /*offset=*/a->imm,
+                                   &gen_helper_load_cap_via_cap);
 }
 
 // Stores
@@ -458,15 +489,15 @@ TRANSLATE_EXPLICIT_STORE(st_d, MO_Q)
 static inline bool trans_st_c_ddc(DisasContext *ctx, arg_st_c_ddc *a)
 {
     // always uses DDC as the base register
-    return gen_cheri_cap_cap_int_imm(a->rs2, CHERI_EXC_REGNUM_DDC, a->rs1, 0,
-                                     &gen_helper_store_cap_via_cap);
+    return gen_cheri_cap_int_plus_imm(a->rs2, a->rs1, 0,
+                                      &gen_helper_store_cap_via_ddc);
 }
 
 static inline bool trans_st_c_cap(DisasContext *ctx, arg_st_c_cap *a)
 {
-    // No immediate available for sccap
-    return gen_cheri_cap_cap_imm(a->rs2, a->rs1, /*offset=*/0,
-                                 &gen_helper_store_cap_via_cap);
+    // No immediate available for sc.cap
+    return gen_cheri_cap_loadstore(ctx, a->rs2, a->rs1, /*offset=*/0,
+                                   &gen_helper_store_cap_via_cap);
 }
 
 static inline bool trans_sc(DisasContext *ctx, arg_sc *a)
@@ -474,11 +505,11 @@ static inline bool trans_sc(DisasContext *ctx, arg_sc *a)
     // RS2 is the value, RS1 is the capability
     if (!ctx->capmode) {
         // Without capmode we store relative to DDC (sc instructions)
-        return gen_cheri_cap_cap_int_imm(a->rs2, CHERI_EXC_REGNUM_DDC, a->rs1,
-                                         a->imm, &gen_helper_store_cap_via_cap);
+        return gen_cheri_cap_int_plus_imm(a->rs2, a->rs1, a->imm,
+                                          &gen_helper_store_cap_via_ddc);
     }
-    return gen_cheri_cap_cap_imm(a->rs2, a->rs1, /*offset=*/a->imm,
-                                 &gen_helper_store_cap_via_cap);
+    return gen_cheri_cap_loadstore(ctx, a->rs2, a->rs1, /*offset=*/a->imm,
+                                   &gen_helper_store_cap_via_cap);
 }
 
 // Atomic ops
@@ -526,7 +557,7 @@ static inline bool trans_sc_c_impl(DisasContext *ctx, arg_atomic *a,
         ctx->base.is_jmp = DISAS_NORETURN;
     } else {
         // Note: we ignore the Acquire/release flags since using
-        // helper_exit_atomic forces exlusive execution so we get SC semantics.
+        // helper_exit_atomic forces exclusive execution so we get SC semantics.
         gen_cheri_int_cap_cap(ctx, a->rd, a->rs1, a->rs2, helper);
     }
     return true;
@@ -591,11 +622,11 @@ static inline bool gen_lr_impl(DisasContext *ctx, TCGv_cap_checked_ptr addr,
         tcg_temp_free_cap_checked(addr);                                       \
         return result;                                                         \
     }
-TRANSLATE_LR_EXPLICIT(lr_b, MO_SB);
-TRANSLATE_LR_EXPLICIT(lr_h, MO_SW);
-TRANSLATE_LR_EXPLICIT(lr_w, MO_SL);
+TRANSLATE_LR_EXPLICIT(lr_b, MO_ALIGN | MO_SB);
+TRANSLATE_LR_EXPLICIT(lr_h, MO_ALIGN | MO_SW);
+TRANSLATE_LR_EXPLICIT(lr_w, MO_ALIGN | MO_SL);
 #ifdef TARGET_RISCV64
-TRANSLATE_LR_EXPLICIT(lr_d, MO_Q);
+TRANSLATE_LR_EXPLICIT(lr_d, MO_ALIGN | MO_Q);
 #endif
 
 static inline bool gen_sc_impl(DisasContext *ctx, TCGv_cap_checked_ptr addr,
@@ -623,9 +654,9 @@ static inline bool gen_sc_impl(DisasContext *ctx, TCGv_cap_checked_ptr addr,
         tcg_temp_free_cap_checked(addr);                                       \
         return result;                                                         \
     }
-TRANSLATE_SC_EXPLICIT(sc_b, MO_SB);
-TRANSLATE_SC_EXPLICIT(sc_h, MO_SW);
-TRANSLATE_SC_EXPLICIT(sc_w, MO_SL);
+TRANSLATE_SC_EXPLICIT(sc_b, MO_ALIGN | MO_SB);
+TRANSLATE_SC_EXPLICIT(sc_h, MO_ALIGN | MO_SW);
+TRANSLATE_SC_EXPLICIT(sc_w, MO_ALIGN | MO_SL);
 #ifdef TARGET_RISCV64
-TRANSLATE_SC_EXPLICIT(sc_d, MO_Q);
+TRANSLATE_SC_EXPLICIT(sc_d, MO_ALIGN | MO_Q);
 #endif
