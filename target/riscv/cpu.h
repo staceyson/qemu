@@ -715,9 +715,8 @@ riscv_cpu_get_tb_cpu_state(CPURISCVState *env, target_ulong *pc,
 #ifdef TARGET_CHERI
     cheri_cpu_get_tb_cpu_state(&env->PCC, &env->DDC, pcc_base, pcc_top,
                                cheri_flags);
-#else
-    *cs_base = 0;
 #endif
+    *cs_base = 0;
     if (riscv_has_ext(env, RVV)) {
         uint32_t vlmax = vext_get_vlmax(env_archcpu(env), env->vtype);
         bool vl_eq_vlmax = (env->vstart == 0) && (vlmax == env->vl);
