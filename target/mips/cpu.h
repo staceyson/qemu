@@ -1482,6 +1482,7 @@ mips_cpu_get_tb_cpu_state(CPUMIPSState *env, target_ulong *pc,
                           uint32_t *flags)
 {
     *pc = PC_ADDR(env); // We want the full virtual address here (no offset)
+    *cs_base = 0;
     *flags = env->hflags &
              (MIPS_HFLAG_TMASK | MIPS_HFLAG_BMASK | MIPS_HFLAG_HWRENA_ULR);
 #ifdef TARGET_CHERI
