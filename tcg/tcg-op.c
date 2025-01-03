@@ -3378,12 +3378,12 @@ enum GEN_OP_SIGN {
 static MemOp get_memop_for_operation(MemOp base_memop,
                                      enum GEN_OP_SIGN gen_sign)
 {
-    if (((base_memop & MO_SIZE) == MO_Q) || gen_sign == GEN_OP_NO_SIGN)
-        return base_memop;
+    if ((base_memop & MO_SIZE) == MO_Q || gen_sign == GEN_OP_UNSIGNED)
+        return base_memop & ~MO_SIGN;
     else if (gen_sign == GEN_OP_SIGNED)
         return base_memop | MO_SIGN;
     else
-        return base_memop & ~MO_SIGN;
+        return base_memop;
 }
 
 static void do_nonatomic_op_i32(TCGv_i32 ret, TCGv_cap_checked_ptr checked_addr,
