@@ -660,7 +660,7 @@ void rvfi_dii_communicate(CPUState* cs, CPURISCVState* env, bool was_trap) {
             env->rvfi_dii_have_injected_insn = true;
             env->rvfi_dii_trace.PC.rvfi_pc_rdata = GET_SPECIAL_REG_ARCH(env, pc, pcc);
             env->rvfi_dii_trace.INST.rvfi_mode = env->priv;
-            env->rvfi_dii_trace.INST.rvfi_ixl = get_field(env->misa, MISA_MXL);
+            env->rvfi_dii_trace.INST.rvfi_ixl = riscv_cpu_mxl(env);
             resume_all_vcpus();
             cpu_resume(cs);
             env->rvfi_dii_trace.PC.rvfi_pc_wdata = -1; // Will be set after single-step trap
