@@ -117,7 +117,14 @@ static inline size_t num_tagblocks(RAMBlock* ram)
 {
     uint64_t memory_size = memory_region_size(ram->mr);
     size_t result = DIV_ROUND_UP(memory_size, CHERI_CAP_SIZE * CAP_TAGBLK_SIZE);
-    assert(result == (memory_size / CHERI_CAP_SIZE) >> CAP_TAGBLK_SHFT);
+    if (memory_size != result * CHERI_CAP_SIZE * CAP_TAGBLK_SIZE) {
+        warn_report_once(
+            "WARNING: memory region %s size %" PRIu64
+            " is not a multiple of tag block size %d\r",
+            memory_region_name(ram->mr),
+            memory_size,
+            CHERI_CAP_SIZE * CAP_TAGBLK_SIZE);
+    }
     return result;
 }
 
