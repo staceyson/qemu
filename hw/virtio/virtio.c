@@ -21,6 +21,7 @@
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
 #include "hw/virtio/virtio.h"
+#include "hw/virtio/virtio-iocap.h"
 #include "migration/qemu-file-types.h"
 #include "qemu/atomic.h"
 #include "hw/virtio/virtio-bus.h"
@@ -224,7 +225,7 @@ void virtio_queue_update_rings(VirtIODevice *vdev, int n)
         /* not yet setup -> nothing to do */
         return;
     }
-    vring->avail = vring->desc + vring->num * sizeof(VRingDesc);
+    vring->avail = vring->desc + virtio_queue_get_desc_size(vdev, n);
     vring->used = vring_align(vring->avail +
                               offsetof(VRingAvail, ring[vring->num]),
                               vring->align);
@@ -241,6 +242,21 @@ static void vring_split_desc_read(VirtIODevice *vdev, VRingDesc *desc,
     virtio_tswap32s(vdev, &desc->len);
     virtio_tswap16s(vdev, &desc->flags);
     virtio_tswap16s(vdev, &desc->next);
+}
+
+/* Called within rcu_read_lock().  */
+static void vring_iocap_desc_read(VirtIODevice *vdev, VRingDesc *desc,
+                                  MemoryRegionCache *cache, int i)
+{
+    VRingIOCap cap;
+    address_space_read_cached(cache, i * sizeof(VRingIOCap),
+                              &cap, sizeof(VRingIOCap));
+
+    // CCapNativeVirtqDesc are both the same: four native-byte-order fields addr,len,flags,next
+    CCapResult res = ccap2024_11_read_virtio(&cap, (CCapNativeVirtqDesc *)desc);
+    if (res != CCapResult_Success) {
+        virtio_error(vdev, "ccap2024_11_read_virtio failed in vring_iocap_desc_read: %s\n", ccap_result_str(res));
+    }
 }
 
 static void vring_packed_event_read(VirtIODevice *vdev,
@@ -495,6 +511,9 @@ void virtio_queue_set_notification(VirtQueue *vq, int enable)
 
     if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED)) {
         virtio_queue_packed_set_notification(vq, enable);
+    } else if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtio_queue_split_set_notification is agnostic to IOcap
+        virtio_queue_split_set_notification(vq, enable);
     } else {
         virtio_queue_split_set_notification(vq, enable);
     }
@@ -665,6 +684,9 @@ int virtio_queue_empty(VirtQueue *vq)
 {
     if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED)) {
         return virtio_queue_packed_empty(vq);
+    } else if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtio_queue_split_empty is agnostic to IOcap
+        return virtio_queue_split_empty(vq);
     } else {
         return virtio_queue_split_empty(vq);
     }
@@ -740,6 +762,9 @@ void virtqueue_unpop(VirtQueue *vq, const VirtQueueElement *elem,
 
     if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED)) {
         virtqueue_packed_rewind(vq, 1);
+    } else if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtqueue_split_rewind is agnostic to IOcap
+        virtqueue_split_rewind(vq, 1);
     } else {
         virtqueue_split_rewind(vq, 1);
     }
@@ -768,6 +793,9 @@ bool virtqueue_rewind(VirtQueue *vq, unsigned int num)
     vq->inuse -= num;
     if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED)) {
         virtqueue_packed_rewind(vq, num);
+    } else if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtqueue_split_rewind is agnostic to IOcap
+        virtqueue_split_rewind(vq, num);
     } else {
         virtqueue_split_rewind(vq, num);
     }
@@ -850,6 +878,9 @@ void virtqueue_fill(VirtQueue *vq, const VirtQueueElement *elem,
 
     if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED)) {
         virtqueue_packed_fill(vq, elem, len, idx);
+    } else if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - IOcaps only change the desc part of the split queue
+        virtqueue_split_fill(vq, elem, len, idx);
     } else {
         virtqueue_split_fill(vq, elem, len, idx);
     }
@@ -907,6 +938,9 @@ void virtqueue_flush(VirtQueue *vq, unsigned int count)
 
     if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED)) {
         virtqueue_packed_flush(vq, count);
+    } else if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - IOcaps only change the desc part of the split queue
+        virtqueue_split_flush(vq, count);
     } else {
         virtqueue_split_flush(vq, count);
     }
@@ -1245,6 +1279,143 @@ err:
     goto done;
 }
 
+static int virtqueue_iocap_read_next_desc(VirtIODevice *vdev, VRingDesc *desc,
+                                          MemoryRegionCache *desc_cache,
+                                          unsigned int max, unsigned int *next)
+{
+    /* If this descriptor says it doesn't chain, we're done. */
+    if (!(desc->flags & VRING_DESC_F_NEXT)) {
+        return VIRTQUEUE_READ_DESC_DONE;
+    }
+
+    /* Check they're not leading us off end of descriptors. */
+    *next = desc->next;
+    /* Make sure compiler knows to grab that: we don't want it changing! */
+    smp_wmb();
+
+    if (*next >= max) {
+        virtio_error(vdev, "Desc next is %u", *next);
+        return VIRTQUEUE_READ_DESC_ERROR;
+    }
+
+    vring_iocap_desc_read(vdev, desc, desc_cache, *next);
+    return VIRTQUEUE_READ_DESC_MORE;
+}
+
+static void virtqueue_iocap_get_avail_bytes(VirtQueue *vq,
+                            unsigned int *in_bytes, unsigned int *out_bytes,
+                            unsigned max_in_bytes, unsigned max_out_bytes)
+{
+    VirtIODevice *vdev = vq->vdev;
+    unsigned int max, idx;
+    unsigned int total_bufs, in_total, out_total;
+    VRingMemoryRegionCaches *caches;
+    MemoryRegionCache indirect_desc_cache = MEMORY_REGION_CACHE_INVALID;
+    int64_t len = 0;
+    int rc;
+
+    RCU_READ_LOCK_GUARD();
+
+    idx = vq->last_avail_idx;
+    total_bufs = in_total = out_total = 0;
+
+    max = vq->vring.num;
+    caches = vring_get_region_caches(vq);
+    if (!caches) {
+        goto err;
+    }
+
+    while ((rc = virtqueue_num_heads(vq, idx)) > 0) {
+        MemoryRegionCache *desc_cache = &caches->desc;
+        unsigned int num_bufs;
+        VRingDesc desc;
+        unsigned int i;
+
+        num_bufs = total_bufs;
+
+        if (!virtqueue_get_head(vq, idx++, &i)) {
+            goto err;
+        }
+
+        vring_iocap_desc_read(vdev, &desc, desc_cache, i);
+
+        if (desc.flags & VRING_DESC_F_INDIRECT) {
+            if (!desc.len || (desc.len % sizeof(VRingIOCap))) {
+                virtio_error(vdev, "Invalid size for indirect buffer table");
+                goto err;
+            }
+
+            /* If we've got too many, that implies a descriptor loop. */
+            if (num_bufs >= max) {
+                virtio_error(vdev, "Looped descriptor");
+                goto err;
+            }
+
+            /* loop over the indirect descriptor table */
+            len = address_space_cache_init(&indirect_desc_cache,
+                                           vdev->dma_as,
+                                           desc.addr, desc.len, false);
+            desc_cache = &indirect_desc_cache;
+            if (len < desc.len) {
+                virtio_error(vdev, "Cannot map indirect buffer");
+                goto err;
+            }
+
+            max = desc.len / sizeof(VRingIOCap);
+            num_bufs = i = 0;
+            vring_iocap_desc_read(vdev, &desc, desc_cache, i);
+        }
+
+        do {
+            /* If we've got too many, that implies a descriptor loop. */
+            if (++num_bufs > max) {
+                virtio_error(vdev, "Looped descriptor");
+                goto err;
+            }
+
+            if (desc.flags & VRING_DESC_F_WRITE) {
+                in_total += desc.len;
+            } else {
+                out_total += desc.len;
+            }
+            if (in_total >= max_in_bytes && out_total >= max_out_bytes) {
+                goto done;
+            }
+
+            rc = virtqueue_iocap_read_next_desc(vdev, &desc, desc_cache, max, &i);
+        } while (rc == VIRTQUEUE_READ_DESC_MORE);
+
+        if (rc == VIRTQUEUE_READ_DESC_ERROR) {
+            goto err;
+        }
+
+        if (desc_cache == &indirect_desc_cache) {
+            address_space_cache_destroy(&indirect_desc_cache);
+            total_bufs++;
+        } else {
+            total_bufs = num_bufs;
+        }
+    }
+
+    if (rc < 0) {
+        goto err;
+    }
+
+done:
+    address_space_cache_destroy(&indirect_desc_cache);
+    if (in_bytes) {
+        *in_bytes = in_total;
+    }
+    if (out_bytes) {
+        *out_bytes = out_total;
+    }
+    return;
+
+err:
+    in_total = out_total = 0;
+    goto done;
+}
+
 void virtqueue_get_avail_bytes(VirtQueue *vq, unsigned int *in_bytes,
                                unsigned int *out_bytes,
                                unsigned max_in_bytes, unsigned max_out_bytes)
@@ -1262,7 +1433,10 @@ void virtqueue_get_avail_bytes(VirtQueue *vq, unsigned int *in_bytes,
     }
 
     desc_size = virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED) ?
-                                sizeof(VRingPackedDesc) : sizeof(VRingDesc);
+                                sizeof(VRingPackedDesc) : (
+                                    virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE) ?
+                                        sizeof(VRingIOCap) : sizeof(VRingDesc)
+                                );
     if (caches->desc.len < vq->vring.num * desc_size) {
         virtio_error(vq->vdev, "Cannot map descriptor ring");
         goto err;
@@ -1271,6 +1445,9 @@ void virtqueue_get_avail_bytes(VirtQueue *vq, unsigned int *in_bytes,
     if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED)) {
         virtqueue_packed_get_avail_bytes(vq, in_bytes, out_bytes,
                                          max_in_bytes, max_out_bytes);
+    } else if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        virtqueue_iocap_get_avail_bytes(vq, in_bytes, out_bytes,
+                                        max_in_bytes, max_out_bytes);
     } else {
         virtqueue_split_get_avail_bytes(vq, in_bytes, out_bytes,
                                         max_in_bytes, max_out_bytes);
@@ -1548,6 +1725,143 @@ err_undo_map:
     goto done;
 }
 
+static void *virtqueue_iocap_pop(VirtQueue *vq, size_t sz)
+{
+    unsigned int i, head, max;
+    VRingMemoryRegionCaches *caches;
+    MemoryRegionCache indirect_desc_cache = MEMORY_REGION_CACHE_INVALID;
+    MemoryRegionCache *desc_cache;
+    int64_t len;
+    VirtIODevice *vdev = vq->vdev;
+    VirtQueueElement *elem = NULL;
+    unsigned out_num, in_num, elem_entries;
+    hwaddr addr[VIRTQUEUE_MAX_SIZE];
+    struct iovec iov[VIRTQUEUE_MAX_SIZE];
+    VRingDesc desc;
+    int rc;
+
+    RCU_READ_LOCK_GUARD();
+    if (virtio_queue_empty_rcu(vq)) {
+        goto done;
+    }
+    /* Needed after virtio_queue_empty(), see comment in
+     * virtqueue_num_heads(). */
+    smp_rmb();
+
+    /* When we start there are none of either input nor output. */
+    out_num = in_num = elem_entries = 0;
+
+    max = vq->vring.num;
+
+    if (vq->inuse >= vq->vring.num) {
+        virtio_error(vdev, "Virtqueue size exceeded");
+        goto done;
+    }
+
+    if (!virtqueue_get_head(vq, vq->last_avail_idx++, &head)) {
+        goto done;
+    }
+
+    if (virtio_vdev_has_feature(vdev, VIRTIO_RING_F_EVENT_IDX)) {
+        vring_set_avail_event(vq, vq->last_avail_idx);
+    }
+
+    i = head;
+
+    caches = vring_get_region_caches(vq);
+    if (!caches) {
+        virtio_error(vdev, "Region caches not initialized");
+        goto done;
+    }
+
+    if (caches->desc.len < max * sizeof(VRingIOCap)) {
+        virtio_error(vdev, "Cannot map descriptor ring");
+        goto done;
+    }
+
+    desc_cache = &caches->desc;
+    vring_iocap_desc_read(vdev, &desc, desc_cache, i);
+    if (desc.flags & VRING_DESC_F_INDIRECT) {
+        if (!desc.len || (desc.len % sizeof(VRingIOCap))) {
+            virtio_error(vdev, "Invalid size for indirect buffer table");
+            goto done;
+        }
+
+        /* loop over the indirect descriptor table */
+        len = address_space_cache_init(&indirect_desc_cache, vdev->dma_as,
+                                       desc.addr, desc.len, false);
+        desc_cache = &indirect_desc_cache;
+        if (len < desc.len) {
+            virtio_error(vdev, "Cannot map indirect buffer");
+            goto done;
+        }
+
+        max = desc.len / sizeof(VRingIOCap);
+        i = 0;
+        vring_iocap_desc_read(vdev, &desc, desc_cache, i);
+    }
+
+    /* Collect all the descriptors */
+    do {
+        bool map_ok;
+
+        if (desc.flags & VRING_DESC_F_WRITE) {
+            map_ok = virtqueue_map_desc(vdev, &in_num, addr + out_num,
+                                        iov + out_num,
+                                        VIRTQUEUE_MAX_SIZE - out_num, true,
+                                        desc.addr, desc.len);
+        } else {
+            if (in_num) {
+                virtio_error(vdev, "Incorrect order for descriptors");
+                goto err_undo_map;
+            }
+            map_ok = virtqueue_map_desc(vdev, &out_num, addr, iov,
+                                        VIRTQUEUE_MAX_SIZE, false,
+                                        desc.addr, desc.len);
+        }
+        if (!map_ok) {
+            goto err_undo_map;
+        }
+
+        /* If we've got too many, that implies a descriptor loop. */
+        if (++elem_entries > max) {
+            virtio_error(vdev, "Looped descriptor");
+            goto err_undo_map;
+        }
+
+        rc = virtqueue_iocap_read_next_desc(vdev, &desc, desc_cache, max, &i);
+    } while (rc == VIRTQUEUE_READ_DESC_MORE);
+
+    if (rc == VIRTQUEUE_READ_DESC_ERROR) {
+        goto err_undo_map;
+    }
+
+    /* Now copy what we have collected and mapped */
+    elem = virtqueue_alloc_element(sz, out_num, in_num);
+    elem->index = head;
+    elem->ndescs = 1;
+    for (i = 0; i < out_num; i++) {
+        elem->out_addr[i] = addr[i];
+        elem->out_sg[i] = iov[i];
+    }
+    for (i = 0; i < in_num; i++) {
+        elem->in_addr[i] = addr[out_num + i];
+        elem->in_sg[i] = iov[out_num + i];
+    }
+
+    vq->inuse++;
+
+    trace_virtqueue_pop(vq, elem, elem->in_num, elem->out_num);
+done:
+    address_space_cache_destroy(&indirect_desc_cache);
+
+    return elem;
+
+err_undo_map:
+    virtqueue_undo_map_desc(out_num, in_num, iov);
+    goto done;
+}
+
 static void *virtqueue_packed_pop(VirtQueue *vq, size_t sz)
 {
     unsigned int i, max;
@@ -1691,6 +2005,8 @@ void *virtqueue_pop(VirtQueue *vq, size_t sz)
 
     if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_RING_PACKED)) {
         return virtqueue_packed_pop(vq, sz);
+    } else if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        return virtqueue_iocap_pop(vq, sz);
     } else {
         return virtqueue_split_pop(vq, sz);
     }
@@ -1791,6 +2107,9 @@ unsigned int virtqueue_drop_all(VirtQueue *vq)
 
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED)) {
         return virtqueue_packed_drop_all(vq);
+    } else if (virtio_vdev_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtqueue_split_drop_all is implemented entirely in terms of other IOCap aware functions
+        return virtqueue_split_drop_all(vq);
     } else {
         return virtqueue_split_drop_all(vq);
     }
@@ -1812,6 +2131,8 @@ typedef struct VirtQueueElementOld {
     struct iovec in_sg[VIRTQUEUE_MAX_SIZE];
     struct iovec out_sg[VIRTQUEUE_MAX_SIZE];
 } VirtQueueElementOld;
+
+// TODO do IOcaps affect this?
 
 void *qemu_get_virtqueue_element(VirtIODevice *vdev, QEMUFile *f, size_t sz)
 {
@@ -2520,6 +2841,9 @@ static bool virtio_should_notify(VirtIODevice *vdev, VirtQueue *vq)
 {
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED)) {
         return virtio_packed_should_notify(vdev, vq);
+    } else if (virtio_vdev_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtio_split_should_notify is agnostic to IOcap
+        return virtio_split_should_notify(vdev, vq);
     } else {
         return virtio_split_should_notify(vdev, vq);
     }
@@ -2615,6 +2939,12 @@ static bool virtio_packed_virtqueue_needed(void *opaque)
     return virtio_host_has_feature(vdev, VIRTIO_F_RING_PACKED);
 }
 
+static bool virtio_iocap_virtqueue_needed(void *opaque) {
+    VirtIODevice *vdev = opaque;
+
+    return virtio_host_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE);
+}
+
 static bool virtio_ringsize_needed(void *opaque)
 {
     VirtIODevice *vdev = opaque;
@@ -2684,6 +3014,21 @@ static const VMStateDescription vmstate_packed_virtqueue = {
     }
 };
 
+// TODO not sure what this is or does
+static const VMStateDescription vmstate_iocap_virtqueue = {
+    .name = "iocap_virtqueue_state",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT16(last_avail_idx, struct VirtQueue),
+        VMSTATE_BOOL(last_avail_wrap_counter, struct VirtQueue),
+        VMSTATE_UINT16(used_idx, struct VirtQueue),
+        VMSTATE_BOOL(used_wrap_counter, struct VirtQueue),
+        VMSTATE_UINT32(inuse, struct VirtQueue),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static const VMStateDescription vmstate_virtio_virtqueues = {
     .name = "virtio/virtqueues",
     .version_id = 1,
@@ -2704,6 +3049,18 @@ static const VMStateDescription vmstate_virtio_packed_virtqueues = {
     .fields = (VMStateField[]) {
         VMSTATE_STRUCT_VARRAY_POINTER_KNOWN(vq, struct VirtIODevice,
                       VIRTIO_QUEUE_MAX, 0, vmstate_packed_virtqueue, VirtQueue),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static const VMStateDescription vmstate_virtio_ioccap_virtqueues = {
+    .name = "virtio/iocap_virtqueues",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = &virtio_iocap_virtqueue_needed,
+    .fields = (VMStateField[]) {
+        VMSTATE_STRUCT_VARRAY_POINTER_KNOWN(vq, struct VirtIODevice,
+                      VIRTIO_QUEUE_MAX, 0, vmstate_iocap_virtqueue, VirtQueue),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -3345,7 +3702,7 @@ hwaddr virtio_queue_get_used_addr(VirtIODevice *vdev, int n)
 
 hwaddr virtio_queue_get_desc_size(VirtIODevice *vdev, int n)
 {
-    return sizeof(VRingDesc) * vdev->vq[n].vring.num;
+    return (virtio_vdev_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE) ? sizeof(VRingIOCap) : sizeof(VRingDesc)) * vdev->vq[n].vring.num;
 }
 
 hwaddr virtio_queue_get_avail_size(VirtIODevice *vdev, int n)
@@ -3355,6 +3712,7 @@ hwaddr virtio_queue_get_avail_size(VirtIODevice *vdev, int n)
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED)) {
         return sizeof(struct VRingPackedDescEvent);
     }
+    // No change for IOcap - IOcaps only change the desc part of the split queue
 
     s = virtio_vdev_has_feature(vdev, VIRTIO_RING_F_EVENT_IDX) ? 2 : 0;
     return offsetof(VRingAvail, ring) +
@@ -3368,6 +3726,7 @@ hwaddr virtio_queue_get_used_size(VirtIODevice *vdev, int n)
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED)) {
         return sizeof(struct VRingPackedDescEvent);
     }
+    // No change for IOcap - IOcaps only change the desc part of the split queue
 
     s = virtio_vdev_has_feature(vdev, VIRTIO_RING_F_EVENT_IDX) ? 2 : 0;
     return offsetof(VRingUsed, ring) +
@@ -3398,6 +3757,9 @@ unsigned int virtio_queue_get_last_avail_idx(VirtIODevice *vdev, int n)
 {
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED)) {
         return virtio_queue_packed_get_last_avail_idx(vdev, n);
+    } else if (virtio_vdev_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtio_queue_split_get_last_avail_idx is agnostic to IOcap
+        return virtio_queue_split_get_last_avail_idx(vdev, n);
     } else {
         return virtio_queue_split_get_last_avail_idx(vdev, n);
     }
@@ -3428,6 +3790,9 @@ void virtio_queue_set_last_avail_idx(VirtIODevice *vdev, int n,
 {
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED)) {
         virtio_queue_packed_set_last_avail_idx(vdev, n, idx);
+    } else if (virtio_vdev_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtio_queue_split_set_last_avail_idx is agnostic to IOcap
+        virtio_queue_split_set_last_avail_idx(vdev, n, idx);
     } else {
         virtio_queue_split_set_last_avail_idx(vdev, n, idx);
     }
@@ -3454,6 +3819,9 @@ void virtio_queue_restore_last_avail_idx(VirtIODevice *vdev, int n)
 {
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED)) {
         virtio_queue_packed_restore_last_avail_idx(vdev, n);
+    } else if (virtio_vdev_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtio_queue_split_restore_last_avail_idx is agnostic to IOcap
+        virtio_queue_split_restore_last_avail_idx(vdev, n);
     } else {
         virtio_queue_split_restore_last_avail_idx(vdev, n);
     }
@@ -3477,6 +3845,9 @@ void virtio_queue_update_used_idx(VirtIODevice *vdev, int n)
 {
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED)) {
         return virtio_queue_packed_update_used_idx(vdev, n);
+    } else if (virtio_vdev_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE)) {
+        // No change for IOcap - virtio_split_packed_update_used_idx is agnostic to IOcap
+        return virtio_split_packed_update_used_idx(vdev, n);
     } else {
         return virtio_split_packed_update_used_idx(vdev, n);
     }

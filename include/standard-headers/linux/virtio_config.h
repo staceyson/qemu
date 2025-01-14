@@ -90,4 +90,13 @@
  * Does the device support Single Root I/O Virtualization?
  */
 #define VIRTIO_F_SR_IOV			37
+
+/*
+ * Does the device use IOCaps as virtio descriptors?
+ * Must be mutually exclusive with VIRTIO_F_RING_PACKED.
+ * TODO Rename to VIRTIO_F_RING_IOCAP and put inside the 28-38 space.
+ * TODO Note that on Linux this is already taken by VIRTIO_F_ADMIN_VQ
+ * https://github.com/torvalds/linux/blob/master/include/uapi/linux/virtio_config.h
+ */
+#define VIRTIO_F_IOCAP_QUEUE		41
 #endif /* _LINUX_VIRTIO_CONFIG_H */
