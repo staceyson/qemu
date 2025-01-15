@@ -35,6 +35,7 @@
 #include "hw/riscv/numa.h"
 #include "hw/intc/sifive_clint.h"
 #include "hw/intc/sifive_plic.h"
+#include "hw/iocap/iocap_keymngr.h"
 #include "hw/misc/sifive_test.h"
 #include "chardev/char.h"
 #include "sysemu/arch_init.h"
@@ -61,6 +62,7 @@ static const MemMapEntry virt_memmap[] = {
     [VIRT_FLASH] =       { 0x20000000,     0x4000000 },
     [VIRT_PCIE_ECAM] =   { 0x30000000,    0x10000000 },
     [VIRT_PCIE_MMIO] =   { 0x40000000,    0x40000000 },
+    [VIRT_IOCAP_KEYMNGR] = { 0x50000000,      0x2000 },
     [VIRT_DRAM] =        { 0x80000000,           0x0 },
 };
 
@@ -755,6 +757,9 @@ static void virt_machine_init(MachineState *machine)
             memmap[VIRT_VIRTIO].base + i * memmap[VIRT_VIRTIO].size,
             qdev_get_gpio_in(DEVICE(virtio_plic), VIRTIO_IRQ + i));
     }
+
+    /* IOCap MMIO key manager device */
+    iocap_keymngr_create(memmap[VIRT_IOCAP_KEYMNGR].base);
 
     gpex_pcie_init(system_memory,
                    memmap[VIRT_PCIE_ECAM].base,
