@@ -291,7 +291,7 @@ typedef struct VirtIORNGConf VirtIORNGConf;
     DEFINE_PROP_BIT64("packed", _state, _field, \
                       VIRTIO_F_RING_PACKED, false), \
     DEFINE_PROP_BIT64("iocap_queue", _state, _field, \
-                      VIRTIO_F_IOCAP_QUEUE, false) // TODO make true :)
+                      VIRTIO_F_IOCAP_QUEUE, true)
 
 hwaddr virtio_queue_get_desc_addr(VirtIODevice *vdev, int n);
 bool virtio_queue_enabled_legacy(VirtIODevice *vdev, int n);
