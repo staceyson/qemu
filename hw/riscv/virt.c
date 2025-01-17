@@ -368,6 +368,15 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
         g_free(name);
     }
 
+    name = g_strdup_printf("/soc/iocap_keymngr@%lx",
+    (long)(memmap[VIRT_IOCAP_KEYMNGR].base + i * memmap[VIRT_IOCAP_KEYMNGR].size));
+    qemu_fdt_add_subnode(fdt, name);
+    qemu_fdt_setprop_string(fdt, name, "compatible", "sws35,iocap_keymngr");
+    qemu_fdt_setprop_cells(fdt, name, "reg",
+        0x0, memmap[VIRT_IOCAP_KEYMNGR].base + i * memmap[VIRT_IOCAP_KEYMNGR].size,
+        0x0, memmap[VIRT_IOCAP_KEYMNGR].size);
+    g_free(name);
+
     name = g_strdup_printf("/soc/pci@%lx",
         (long) memmap[VIRT_PCIE_ECAM].base);
     qemu_fdt_add_subnode(fdt, name);
