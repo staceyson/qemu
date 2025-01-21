@@ -53,6 +53,7 @@ static const MemMapEntry virt_memmap[] = {
     [VIRT_MROM] =        {     0x1000,        0xf000 },
     [VIRT_TEST] =        {   0x100000,        0x1000 },
     [VIRT_RTC] =         {   0x101000,        0x1000 },
+    [VIRT_IOCAP_KEYMNGR] = { 0x102000,        0x2000 },
     [VIRT_CLINT] =       {  0x2000000,       0x10000 },
     [VIRT_PCIE_PIO] =    {  0x3000000,       0x10000 },
     [VIRT_PLIC] =        {  0xc000000, VIRT_PLIC_SIZE(VIRT_CPUS_MAX * 2) },
@@ -62,7 +63,6 @@ static const MemMapEntry virt_memmap[] = {
     [VIRT_FLASH] =       { 0x20000000,     0x4000000 },
     [VIRT_PCIE_ECAM] =   { 0x30000000,    0x10000000 },
     [VIRT_PCIE_MMIO] =   { 0x40000000,    0x40000000 },
-    [VIRT_IOCAP_KEYMNGR] = { 0x50000000,      0x2000 },
     [VIRT_DRAM] =        { 0x80000000,           0x0 },
 };
 
@@ -369,12 +369,16 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
     }
 
     name = g_strdup_printf("/soc/iocap_keymngr@%lx",
-    (long)(memmap[VIRT_IOCAP_KEYMNGR].base + i * memmap[VIRT_IOCAP_KEYMNGR].size));
+    (long)(memmap[VIRT_IOCAP_KEYMNGR].base));
     qemu_fdt_add_subnode(fdt, name);
     qemu_fdt_setprop_string(fdt, name, "compatible", "sws35,iocap_keymngr");
+    // address-cells and size-cells are both 2, so specify two "cells" (32-bit numbers) for the address and size.
+    // (0, base_32) = base_64
+    // (0, size_32) = size_64
     qemu_fdt_setprop_cells(fdt, name, "reg",
-        0x0, memmap[VIRT_IOCAP_KEYMNGR].base + i * memmap[VIRT_IOCAP_KEYMNGR].size,
+        0x0, memmap[VIRT_IOCAP_KEYMNGR].base,
         0x0, memmap[VIRT_IOCAP_KEYMNGR].size);
+
     g_free(name);
 
     name = g_strdup_printf("/soc/pci@%lx",
