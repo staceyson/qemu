@@ -354,8 +354,29 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
 
     riscv_socket_fdt_write_distance_matrix(mc, fdt);
 
+    // The IOCap key manager device is a bus device parenting all devices that
+    // can map DMA ranges into IOCaps.
+    name = g_strdup_printf("/soc/iocap_keymngr@%lx",
+    (long)(memmap[VIRT_IOCAP_KEYMNGR].base));
+    qemu_fdt_add_subnode(fdt, name);
+    // Keep the size-cell and address-cell properties applied to the toplevel bus
+    qemu_fdt_setprop_cell(fdt, name, "#size-cells", 0x2);
+    qemu_fdt_setprop_cell(fdt, name, "#address-cells", 0x2);
+    // Systems without an iocap_keymngr driver can fallback to simple-bus instead.
+    // IOCap-capable drivers should always ensure that
+    const char* bus_compat[2] = { "sws35,iocap_keymngr", "simple-bus" };
+    qemu_fdt_setprop_string_array(fdt, name, "compatible", (char**)bus_compat, 2);
+    // address-cells and size-cells are both 2, so specify two "cells" (32-bit numbers) for the address and size.
+    // (0, base_32) = base_64
+    // (0, size_32) = size_64
+    qemu_fdt_setprop_cells(fdt, name, "reg",
+        0x0, memmap[VIRT_IOCAP_KEYMNGR].base,
+        0x0, memmap[VIRT_IOCAP_KEYMNGR].size);
+    qemu_fdt_setprop(fdt, name, "ranges", NULL, 0);
+    g_free(name);
+
     for (i = 0; i < VIRTIO_COUNT; i++) {
-        name = g_strdup_printf("/soc/virtio_mmio@%lx",
+        name = g_strdup_printf("/soc/iocap_keymngr/virtio_mmio@%lx",
             (long)(memmap[VIRT_VIRTIO].base + i * memmap[VIRT_VIRTIO].size));
         qemu_fdt_add_subnode(fdt, name);
         qemu_fdt_setprop_string(fdt, name, "compatible", "virtio,mmio");
@@ -367,19 +388,6 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
         qemu_fdt_setprop_cell(fdt, name, "interrupts", VIRTIO_IRQ + i);
         g_free(name);
     }
-
-    name = g_strdup_printf("/soc/iocap_keymngr@%lx",
-    (long)(memmap[VIRT_IOCAP_KEYMNGR].base));
-    qemu_fdt_add_subnode(fdt, name);
-    qemu_fdt_setprop_string(fdt, name, "compatible", "sws35,iocap_keymngr");
-    // address-cells and size-cells are both 2, so specify two "cells" (32-bit numbers) for the address and size.
-    // (0, base_32) = base_64
-    // (0, size_32) = size_64
-    qemu_fdt_setprop_cells(fdt, name, "reg",
-        0x0, memmap[VIRT_IOCAP_KEYMNGR].base,
-        0x0, memmap[VIRT_IOCAP_KEYMNGR].size);
-
-    g_free(name);
 
     name = g_strdup_printf("/soc/pci@%lx",
         (long) memmap[VIRT_PCIE_ECAM].base);
