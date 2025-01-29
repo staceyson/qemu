@@ -68,7 +68,7 @@ static void iocap_keymngr_write(void *opaque, hwaddr addr, uint64_t data, unsign
         s->key_en[key_index] = enabling_key;
     } else if (addr < 0x2000) {
         for (int b = 0; b < size; b++) {
-            s->key_data[addr - 0x1000 + b] = (data >> b) & 0x00;
+            s->key_data[addr - 0x1000 + b] = (data >> b) & 0xFF;
         }
     } else {
         // Invalid address
