@@ -160,7 +160,6 @@ bool iocap_keymngr_check_cap_signature(const CCap2024_11* cap, CCapPerms access_
             cap->signature[3], cap->signature[2], cap->signature[1],
             cap->signature[0], key_id, key[3], key[2], key[1], key[0],
             ccap_result_str(res));
-        abort();
         goto sig_fail;
     }
 
