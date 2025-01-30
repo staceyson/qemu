@@ -20,6 +20,7 @@
 #include "qemu/log.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
+#include "hw/iocap/iocap_keymngr.h"
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-iocap.h"
 #include "migration/qemu-file-types.h"
@@ -249,6 +250,8 @@ static void vring_iocap_desc_read(VirtIODevice *vdev, VRingDesc *desc,
                                   MemoryRegionCache *cache, int i)
 {
     VRingIOCap cap;
+    // TODO check the queue IOCap
+    // TODO check the queue IOCap in other places too
     address_space_read_cached(cache, i * sizeof(VRingIOCap),
                               &cap, sizeof(VRingIOCap));
 
@@ -257,6 +260,9 @@ static void vring_iocap_desc_read(VirtIODevice *vdev, VRingDesc *desc,
     if (res != CCapResult_Success) {
         virtio_error(vdev, "ccap2024_11_read_virtio failed in vring_iocap_desc_read: %s\n", ccap_result_str(res));
     }
+    iocap_keymngr_check_cap_signature(&cap, (desc->flags & CCAP_VIRTQ_F_WRITE)
+                                               ? CCapPerms_Write
+                                               : CCapPerms_Read);
 }
 
 static void vring_packed_event_read(VirtIODevice *vdev,
