@@ -132,21 +132,29 @@ DeviceState *iocap_keymngr_create(hwaddr addr)
 
 bool iocap_keymngr_check_cap_signature(const CCap2024_11* cap, CCapPerms access_mode)
 {
+    static bool have_logged[5] = { false };
+
     if (singleton_iocap_keymngr == NULL) {
-        qemu_log("iocap: checking access when no iocap_keymngr present\n");
+        if (!have_logged[0])
+            qemu_log("iocap: checking access when no iocap_keymngr present\n");
+        have_logged[0] = true;
         return true;
     }
 
     uint32_t key_id;
     CCapResult res = ccap2024_11_read_secret_id(cap, &key_id);
     if (res != CCapResult_Success) {
-        qemu_log("iocap: read_secret_id failed: %s\n", ccap_result_str(res));
+        if (!have_logged[1])
+            qemu_log("iocap: read_secret_id failed: %s\n", ccap_result_str(res));
+        have_logged[1] = true;
         goto sig_fail;
     }
 
     key_id = key_id & 0xFF; // There are only 256 keys
     if (!singleton_iocap_keymngr->key_en[key_id]) {
-        qemu_log("iocap: tried to use disabled key_id %d\n", key_id);
+        if (!have_logged[2])
+            qemu_log("iocap: tried to use disabled key_id %d\n", key_id);
+        have_logged[2] = true;
         goto sig_fail;
     }
 
@@ -154,19 +162,23 @@ bool iocap_keymngr_check_cap_signature(const CCap2024_11* cap, CCapPerms access_
     memcpy(key, &singleton_iocap_keymngr->key_data[key_id * 16], 16);
     res = ccap2024_11_check_signature(cap, &key);
     if (res != CCapResult_Success) {
-        qemu_log(
-            "iocap: check_signature (data %02x%02x%02x%02x) (sig %02x%02x%02x%02x) for key_id %d (%02x%02x%02x%02x) failed: %s\n",
-            cap->data[3], cap->data[2], cap->data[1], cap->data[0],
-            cap->signature[3], cap->signature[2], cap->signature[1],
-            cap->signature[0], key_id, key[3], key[2], key[1], key[0],
-            ccap_result_str(res));
+        if (!have_logged[3])
+            qemu_log(
+                "iocap: check_signature (data %02x%02x%02x%02x) (sig %02x%02x%02x%02x) for key_id %d (%02x%02x%02x%02x) failed: %s\n",
+                cap->data[3], cap->data[2], cap->data[1], cap->data[0],
+                cap->signature[3], cap->signature[2], cap->signature[1],
+                cap->signature[0], key_id, key[3], key[2], key[1], key[0],
+                ccap_result_str(res));
+        have_logged[3] = true;
         goto sig_fail;
     }
 
     CCapPerms perms;
     res = ccap2024_11_read_perms(cap, &perms);
     if (res != CCapResult_Success) {
-        qemu_log("iocap: read_perms failed: %s\n", ccap_result_str(res));
+        if (!have_logged[4])
+            qemu_log("iocap: read_perms failed: %s\n", ccap_result_str(res));
+        have_logged[4] = true;
         goto sig_fail;
     }
 
