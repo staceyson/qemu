@@ -51,28 +51,33 @@ static void iocap_keymngr_write(void *opaque, hwaddr addr, uint64_t data, unsign
         hwaddr key_index = addr >> 4;
         bool enabling_key = data & 1;
 
-        if (enabling_key && !s->key_en[key_index]) {
-            qemu_log(
-                "iocap: enabling key %ld with data 0x%02x%02x%02x%02x%02x%02x%02x%02x_%02x%02x%02x%02x%02x%02x%02x%02x\n",
-                key_index,
-                s->key_data[addr + 15],
-                s->key_data[addr + 14],
-                s->key_data[addr + 13],
-                s->key_data[addr + 12],
-                s->key_data[addr + 11],
-                s->key_data[addr + 10],
-                s->key_data[addr + 9],
-                s->key_data[addr + 8],
-                s->key_data[addr + 7],
-                s->key_data[addr + 6],
-                s->key_data[addr + 5],
-                s->key_data[addr + 4],
-                s->key_data[addr + 3],
-                s->key_data[addr + 2],
-                s->key_data[addr + 1],
-                s->key_data[addr]
-            );
-        }
+        // if (enabling_key && !s->key_en[key_index]) {
+        //     qemu_log(
+        //         "iocap: enabling key %ld with data 0x%02x%02x%02x%02x%02x%02x%02x%02x_%02x%02x%02x%02x%02x%02x%02x%02x\n",
+        //         key_index,
+        //         s->key_data[addr + 15],
+        //         s->key_data[addr + 14],
+        //         s->key_data[addr + 13],
+        //         s->key_data[addr + 12],
+        //         s->key_data[addr + 11],
+        //         s->key_data[addr + 10],
+        //         s->key_data[addr + 9],
+        //         s->key_data[addr + 8],
+        //         s->key_data[addr + 7],
+        //         s->key_data[addr + 6],
+        //         s->key_data[addr + 5],
+        //         s->key_data[addr + 4],
+        //         s->key_data[addr + 3],
+        //         s->key_data[addr + 2],
+        //         s->key_data[addr + 1],
+        //         s->key_data[addr]
+        //     );
+        // } else if (!enabling_key && s->key_en[key_index]) {
+        //     qemu_log(
+        //         "iocap: disabling key %ld\n",
+        //         key_index
+        //         );
+        // }
 
         s->key_en[key_index] = enabling_key;
     } else if (addr < 0x2000) {
