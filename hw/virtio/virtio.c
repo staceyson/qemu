@@ -89,6 +89,7 @@ typedef struct VRing
     hwaddr desc;
     hwaddr avail;
     hwaddr used;
+    CCap2024_11 iocap;
     VRingMemoryRegionCaches *caches;
 } VRing;
 
@@ -135,6 +136,14 @@ struct VirtQueue
     bool host_notifier_enabled;
     QLIST_ENTRY(VirtQueue) node;
 };
+
+static void virtio_check_vq_access(VirtQueue *vq, CCapPerms perms)
+{
+    if (virtio_vdev_has_feature(vq->vdev, VIRTIO_F_IOCAP_QUEUE))
+    {
+        iocap_keymngr_check_cap_signature(&vq->vring.iocap, perms);
+    }
+}
 
 static void virtio_free_region_cache(VRingMemoryRegionCaches *caches)
 {
@@ -249,9 +258,10 @@ static void vring_split_desc_read(VirtIODevice *vdev, VRingDesc *desc,
 static void vring_iocap_desc_read(VirtIODevice *vdev, VRingDesc *desc,
                                   MemoryRegionCache *cache, int i)
 {
+    // Grab the descriptor from the queue. This requires us to check the signature of the
+    // queue's IOCap. That requires us to know which queue it is, so we do it
+    // in virtqueue_iocap_{pop,get_avail_bytes} which are the only functions that call this one.
     VRingIOCap cap;
-    // TODO check the queue IOCap
-    // TODO check the queue IOCap in other places too
     address_space_read_cached(cache, i * sizeof(VRingIOCap),
                               &cap, sizeof(VRingIOCap));
 
@@ -260,6 +270,10 @@ static void vring_iocap_desc_read(VirtIODevice *vdev, VRingDesc *desc,
     if (res != CCapResult_Success) {
         virtio_error(vdev, "ccap2024_11_read_virtio failed in vring_iocap_desc_read: %s\n", ccap_result_str(res));
     }
+    // check the IOCap on read - assume that the point of reading a descriptor
+    // is very close to the point of using said descriptor.
+    // If this is an indirect descriptor, it will be read-only and so
+    // we can read out the other descriptors it points to no problem.
     iocap_keymngr_check_cap_signature(&cap, (desc->flags & CCAP_VIRTQ_F_WRITE)
                                                ? CCapPerms_Write
                                                : CCapPerms_Read);
@@ -319,6 +333,7 @@ static inline uint16_t vring_avail_flags(VirtQueue *vq)
         return 0;
     }
 
+    virtio_check_vq_access(vq, CCapPerms_Read);
     return virtio_lduw_phys_cached(vq->vdev, &caches->avail, pa);
 }
 
@@ -332,6 +347,7 @@ static inline uint16_t vring_avail_idx(VirtQueue *vq)
         return 0;
     }
 
+    virtio_check_vq_access(vq, CCapPerms_Read);
     vq->shadow_avail_idx = virtio_lduw_phys_cached(vq->vdev, &caches->avail, pa);
     return vq->shadow_avail_idx;
 }
@@ -346,6 +362,7 @@ static inline uint16_t vring_avail_ring(VirtQueue *vq, int i)
         return 0;
     }
 
+    virtio_check_vq_access(vq, CCapPerms_Read);
     return virtio_lduw_phys_cached(vq->vdev, &caches->avail, pa);
 }
 
@@ -366,6 +383,7 @@ static inline void vring_used_write(VirtQueue *vq, VRingUsedElem *uelem,
         return;
     }
 
+    virtio_check_vq_access(vq, CCapPerms_Write);
     virtio_tswap32s(vq->vdev, &uelem->id);
     virtio_tswap32s(vq->vdev, &uelem->len);
     address_space_write_cached(&caches->used, pa, uelem, sizeof(VRingUsedElem));
@@ -382,6 +400,7 @@ static uint16_t vring_used_idx(VirtQueue *vq)
         return 0;
     }
 
+    virtio_check_vq_access(vq, CCapPerms_Read);
     return virtio_lduw_phys_cached(vq->vdev, &caches->used, pa);
 }
 
@@ -390,6 +409,8 @@ static inline void vring_used_idx_set(VirtQueue *vq, uint16_t val)
 {
     VRingMemoryRegionCaches *caches = vring_get_region_caches(vq);
     hwaddr pa = offsetof(VRingUsed, idx);
+
+    virtio_check_vq_access(vq, CCapPerms_Write);
 
     if (caches) {
         virtio_stw_phys_cached(vq->vdev, &caches->used, pa, val);
@@ -406,6 +427,8 @@ static inline void vring_used_flags_set_bit(VirtQueue *vq, int mask)
     VirtIODevice *vdev = vq->vdev;
     hwaddr pa = offsetof(VRingUsed, flags);
     uint16_t flags;
+
+    virtio_check_vq_access(vq, CCapPerms_ReadWrite);
 
     if (!caches) {
         return;
@@ -424,6 +447,8 @@ static inline void vring_used_flags_unset_bit(VirtQueue *vq, int mask)
     hwaddr pa = offsetof(VRingUsed, flags);
     uint16_t flags;
 
+    virtio_check_vq_access(vq, CCapPerms_ReadWrite);
+
     if (!caches) {
         return;
     }
@@ -441,6 +466,8 @@ static inline void vring_set_avail_event(VirtQueue *vq, uint16_t val)
     if (!vq->notification) {
         return;
     }
+
+    virtio_check_vq_access(vq, CCapPerms_Write);
 
     caches = vring_get_region_caches(vq);
     if (!caches) {
@@ -1320,6 +1347,9 @@ static void virtqueue_iocap_get_avail_bytes(VirtQueue *vq,
     int64_t len = 0;
     int rc;
 
+    // check the queue IOCap
+    virtio_check_vq_access(vq, CCapPerms_Read);
+
     RCU_READ_LOCK_GUARD();
 
     idx = vq->last_avail_idx;
@@ -1745,6 +1775,9 @@ static void *virtqueue_iocap_pop(VirtQueue *vq, size_t sz)
     struct iovec iov[VIRTQUEUE_MAX_SIZE];
     VRingDesc desc;
     int rc;
+
+    // check the queue IOCap
+    virtio_check_vq_access(vq, CCapPerms_ReadWrite);
 
     RCU_READ_LOCK_GUARD();
     if (virtio_queue_empty_rcu(vq)) {
@@ -2343,6 +2376,7 @@ void virtio_reset(void *opaque)
         vdev->vq[i].vring.desc = 0;
         vdev->vq[i].vring.avail = 0;
         vdev->vq[i].vring.used = 0;
+        vdev->vq[i].vring.iocap = (CCap2024_11) {0};
         vdev->vq[i].last_avail_idx = 0;
         vdev->vq[i].shadow_avail_idx = 0;
         vdev->vq[i].used_idx = 0;
@@ -2572,6 +2606,14 @@ void virtio_queue_set_rings(VirtIODevice *vdev, int n, hwaddr desc,
     vdev->vq[n].vring.avail = avail;
     vdev->vq[n].vring.used = used;
     virtio_init_region_cache(vdev, n);
+}
+
+void virtio_queue_set_iocap(VirtIODevice *vdev, int n, CCap2024_11 *iocap)
+{
+    if (!vdev->vq[n].vring.num) {
+        return;
+    }
+    vdev->vq[n].vring.iocap = *iocap;
 }
 
 void virtio_queue_set_num(VirtIODevice *vdev, int n, int num)
@@ -2945,12 +2987,6 @@ static bool virtio_packed_virtqueue_needed(void *opaque)
     return virtio_host_has_feature(vdev, VIRTIO_F_RING_PACKED);
 }
 
-static bool virtio_iocap_virtqueue_needed(void *opaque) {
-    VirtIODevice *vdev = opaque;
-
-    return virtio_host_has_feature(vdev, VIRTIO_F_IOCAP_QUEUE);
-}
-
 static bool virtio_ringsize_needed(void *opaque)
 {
     VirtIODevice *vdev = opaque;
@@ -3002,27 +3038,14 @@ static const VMStateDescription vmstate_virtqueue = {
     .fields = (VMStateField[]) {
         VMSTATE_UINT64(vring.avail, struct VirtQueue),
         VMSTATE_UINT64(vring.used, struct VirtQueue),
+        VMSTATE_UINT8_ARRAY(vring.iocap.signature, struct VirtQueue, 16),
+        VMSTATE_UINT8_ARRAY(vring.iocap.data, struct VirtQueue, 16),
         VMSTATE_END_OF_LIST()
     }
 };
 
 static const VMStateDescription vmstate_packed_virtqueue = {
     .name = "packed_virtqueue_state",
-    .version_id = 1,
-    .minimum_version_id = 1,
-    .fields = (VMStateField[]) {
-        VMSTATE_UINT16(last_avail_idx, struct VirtQueue),
-        VMSTATE_BOOL(last_avail_wrap_counter, struct VirtQueue),
-        VMSTATE_UINT16(used_idx, struct VirtQueue),
-        VMSTATE_BOOL(used_wrap_counter, struct VirtQueue),
-        VMSTATE_UINT32(inuse, struct VirtQueue),
-        VMSTATE_END_OF_LIST()
-    }
-};
-
-// TODO not sure what this is or does
-static const VMStateDescription vmstate_iocap_virtqueue = {
-    .name = "iocap_virtqueue_state",
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
@@ -3055,18 +3078,6 @@ static const VMStateDescription vmstate_virtio_packed_virtqueues = {
     .fields = (VMStateField[]) {
         VMSTATE_STRUCT_VARRAY_POINTER_KNOWN(vq, struct VirtIODevice,
                       VIRTIO_QUEUE_MAX, 0, vmstate_packed_virtqueue, VirtQueue),
-        VMSTATE_END_OF_LIST()
-    }
-};
-
-static const VMStateDescription vmstate_virtio_ioccap_virtqueues = {
-    .name = "virtio/iocap_virtqueues",
-    .version_id = 1,
-    .minimum_version_id = 1,
-    .needed = &virtio_iocap_virtqueue_needed,
-    .fields = (VMStateField[]) {
-        VMSTATE_STRUCT_VARRAY_POINTER_KNOWN(vq, struct VirtIODevice,
-                      VIRTIO_QUEUE_MAX, 0, vmstate_iocap_virtqueue, VirtQueue),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -3437,6 +3448,7 @@ int virtio_load(VirtIODevice *vdev, QEMUFile *f, int version_id)
                          i, vdev->vq[i].last_avail_idx);
             return -1;
         }
+        // per-queue IOCaps are handled by the vmstate_load_state calls below?
         if (k->load_queue) {
             ret = k->load_queue(qbus->parent, i, f);
             if (ret)

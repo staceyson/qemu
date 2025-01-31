@@ -1,5 +1,6 @@
 #include "hw/iocap/iocap_keymngr.h"
 
+#include "migration/vmstate.h"
 #include "qapi/error.h" /* provides error_fatal() handler */
 #include "qemu/log.h"
 
@@ -89,9 +90,26 @@ static const MemoryRegionOps iocap_keymngr_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
+static const VMStateDescription vmstate_iocap_keymngr = {
+    .name = "iocap_keymngr",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (const VMStateField[]) {
+        VMSTATE_BOOL_ARRAY(key_en, IOCapKeymngrState, 0x100),
+        VMSTATE_UINT8_ARRAY(key_data, IOCapKeymngrState, 0x1000),
+        VMSTATE_UINT64(good_reads, IOCapKeymngrState),
+        VMSTATE_UINT64(bad_reads, IOCapKeymngrState),
+        VMSTATE_UINT64(good_writes, IOCapKeymngrState),
+        VMSTATE_UINT64(bad_writes, IOCapKeymngrState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void iocap_keymngr_instance_init(Object *obj)
 {
     IOCapKeymngrState *s = IOCAP_KEYMNGR(obj);
+
+    vmstate_register(NULL, -1, &vmstate_iocap_keymngr, s);
 
     /* allocate memory map region */
     memory_region_init_io(&s->iomem, obj, &iocap_keymngr_ops, s, TYPE_IOCAP_KEYMNGR, 0x2000);

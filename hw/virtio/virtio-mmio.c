@@ -227,6 +227,14 @@ static uint64_t virtio_mmio_read(void *opaque, hwaddr offset, unsigned size)
     case VIRTIO_MMIO_QUEUE_AVAIL_HIGH:
     case VIRTIO_MMIO_QUEUE_USED_LOW:
     case VIRTIO_MMIO_QUEUE_USED_HIGH:
+    case VIRTIO_MMIO_QUEUE_IOCAP_SIG_WORD0:
+    case VIRTIO_MMIO_QUEUE_IOCAP_SIG_WORD1:
+    case VIRTIO_MMIO_QUEUE_IOCAP_SIG_WORD2:
+    case VIRTIO_MMIO_QUEUE_IOCAP_SIG_WORD3:
+    case VIRTIO_MMIO_QUEUE_IOCAP_TXT_WORD0:
+    case VIRTIO_MMIO_QUEUE_IOCAP_TXT_WORD1:
+    case VIRTIO_MMIO_QUEUE_IOCAP_TXT_WORD2:
+    case VIRTIO_MMIO_QUEUE_IOCAP_TXT_WORD3:
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: read of write-only register (0x%" HWADDR_PRIx ")\n",
                       __func__, offset);
@@ -397,6 +405,8 @@ static void virtio_mmio_write(void *opaque, hwaddr offset, uint64_t value,
                 proxy->vqs[vdev->queue_sel].avail[0],
                 ((uint64_t)proxy->vqs[vdev->queue_sel].used[1]) << 32 |
                 proxy->vqs[vdev->queue_sel].used[0]);
+            virtio_queue_set_iocap(vdev, vdev->queue_sel,
+                                   &proxy->vqs[vdev->queue_sel].iocap);
             proxy->vqs[vdev->queue_sel].enabled = 1;
         } else {
             proxy->vqs[vdev->queue_sel].enabled = 0;
@@ -492,6 +502,31 @@ static void virtio_mmio_write(void *opaque, hwaddr offset, uint64_t value,
             return;
         }
         proxy->vqs[vdev->queue_sel].used[1] = value;
+        break;
+    // TODO endian check?
+    case VIRTIO_MMIO_QUEUE_IOCAP_SIG_WORD0:
+        ((uint32_t*)proxy->vqs[vdev->queue_sel].iocap.signature)[0] = value;
+        break;
+    case VIRTIO_MMIO_QUEUE_IOCAP_SIG_WORD1:
+        ((uint32_t*)proxy->vqs[vdev->queue_sel].iocap.signature)[1] = value;
+        break;
+    case VIRTIO_MMIO_QUEUE_IOCAP_SIG_WORD2:
+        ((uint32_t*)proxy->vqs[vdev->queue_sel].iocap.signature)[2] = value;
+        break;
+    case VIRTIO_MMIO_QUEUE_IOCAP_SIG_WORD3:
+        ((uint32_t*)proxy->vqs[vdev->queue_sel].iocap.signature)[3] = value;
+        break;
+    case VIRTIO_MMIO_QUEUE_IOCAP_TXT_WORD0:
+        ((uint32_t*)proxy->vqs[vdev->queue_sel].iocap.data)[0] = value;
+        break;
+    case VIRTIO_MMIO_QUEUE_IOCAP_TXT_WORD1:
+        ((uint32_t*)proxy->vqs[vdev->queue_sel].iocap.data)[1] = value;
+        break;
+    case VIRTIO_MMIO_QUEUE_IOCAP_TXT_WORD2:
+        ((uint32_t*)proxy->vqs[vdev->queue_sel].iocap.data)[2] = value;
+        break;
+    case VIRTIO_MMIO_QUEUE_IOCAP_TXT_WORD3:
+        ((uint32_t*)proxy->vqs[vdev->queue_sel].iocap.data)[3] = value;
         break;
     case VIRTIO_MMIO_MAGIC_VALUE:
     case VIRTIO_MMIO_VERSION:
@@ -640,6 +675,7 @@ static void virtio_mmio_reset(DeviceState *d)
             proxy->vqs[i].desc[0] = proxy->vqs[i].desc[1] = 0;
             proxy->vqs[i].avail[0] = proxy->vqs[i].avail[1] = 0;
             proxy->vqs[i].used[0] = proxy->vqs[i].used[1] = 0;
+            proxy->vqs[i].iocap = (CCap2024_11) {0};
         }
     }
 }

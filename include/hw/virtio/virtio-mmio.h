@@ -22,6 +22,7 @@
 #ifndef HW_VIRTIO_MMIO_H
 #define HW_VIRTIO_MMIO_H
 
+#include "hw/iocap/iocap.h"
 #include "hw/virtio/virtio-bus.h"
 #include "qom/object.h"
 
@@ -47,6 +48,7 @@ typedef struct VirtIOMMIOQueue {
     uint32_t desc[2];
     uint32_t avail[2];
     uint32_t used[2];
+    CCap2024_11 iocap __attribute__((aligned(4)));
 } VirtIOMMIOQueue;
 
 struct VirtIOMMIOProxy {
