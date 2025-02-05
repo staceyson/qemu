@@ -599,6 +599,63 @@ static inline bool trans_amoswap_c(DisasContext *ctx, arg_amoswap_c *a)
     return true;
 }
 
+static inline bool do_trans_modesw(DisasContext *ctx, bool to_capmode)
+{
+    if (ctx->capmode == to_capmode) {
+        qemu_log_mask_and_addr(CPU_LOG_INSTR, ctx->base.pc_first,
+                               "Redundant modesw at " TARGET_FMT_lx " (%s)",
+                               ctx->base.pc_first,
+                               lookup_symbol(ctx->base.pc_first));
+        return true;
+    }
+    gen_helper_modesw(cpu_env, tcg_const_i32(to_capmode));
+
+    /*
+     * There's a number of RISC-V instructions whose behaviour depends on the
+     * mode. For some of them, the mode is checked at translation time (not at
+     * execution time).
+     * -> We have to process the mode update before any further translations.
+     *
+     * This comes down to ending the current translation block (tb). The tb is
+     * then cached and executed. After that, the status is updated by
+     * cheri_cpu_get_tb_cpu_state before the next tb is translated.
+     *
+     * We were wondering if the tb cache would cause issues in a scenario
+     * such as
+     *    - tb with modesw is executed
+     *    - mode update
+     *    - next tb is to be translated - but it's already in the cache
+     *    - cached tb is executed - but it was translated based on
+     *      previous mode
+     *
+     * Note: The key for locating a cached tb in the hashtable includes the cpu
+     * status (part of which is the mode), so even if the next PC address has a
+     * cached TB, the lookup will not find the mismatched one.
+     *
+     * TODO: it should be possible to update the flag in DisasContext and
+     * continue translation after the modesw, but I am not confident this will
+     * be correct. Once we have some unit tests that we can run we should try
+     * to make this change since it will improve the performance of hybrid code.
+     * See Morello code which uses DISAS_UPDATE_EXIT.
+     */
+    /* create tcg instruction to exit the tb */
+    gen_update_cpu_pc(ctx->pc_succ_insn);
+    tcg_gen_exit_tb(NULL, 0);
+    /* This indicates to riscv_tr_tb_stop that no cleanup is needed. */
+    ctx->base.is_jmp = DISAS_NORETURN;
+    return true;
+}
+
+static inline bool trans_modesw_cap(DisasContext *ctx, arg_modesw_cap *a)
+{
+    return do_trans_modesw(ctx, /*to_capmode=*/true);
+}
+
+static inline bool trans_modesw_int(DisasContext *ctx, arg_modesw_int *a)
+{
+    return do_trans_modesw(ctx, /*to_capmode=*/false);
+}
+
 // Explicit CAP/DDC atomic ops (no unsigned versions):
 // Reuses gen_lr_impl, defined in trans_rva.c.inc
 static inline bool gen_lr_impl(DisasContext *ctx, TCGv_cap_checked_ptr addr,
