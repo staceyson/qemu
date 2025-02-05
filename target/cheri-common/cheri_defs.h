@@ -149,7 +149,8 @@ typedef enum CheriPermissions {
 } CheriPermissions;
 
 typedef enum CheriFlags {
-    CHERI_FLAG_CAPMODE = (1 << 0),
+    CHERI_FLAG_INTMODE = 0,
+    CHERI_FLAG_CAPMODE = 1,
 } CheriFlags;
 
 typedef enum CheriTbFlags {

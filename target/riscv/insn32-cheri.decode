@@ -175,3 +175,8 @@ sc_w_cap       1111100  ..... ..... 000 11010 1011011 @atom_st_cap_or_ddc
 #                                       11101 is reserved
 #                                       11110 is reserved
 #                                       11111 is reserved
+
+### Zero operands
+
+modesw_cap 0001001 00000 00000 001 00000 0110011
+modesw_int 0001010 00000 00000 001 00000 0110011

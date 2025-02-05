@@ -543,6 +543,10 @@ typedef enum {
     rv_op_cincoffsetimm,
     rv_op_csetboundsimm,
 
+    // Zero operand
+    rv_op_modesw_cap,
+    rv_op_modesw_int,
+
     // Two operand
     rv_op_cgetperm,
     rv_op_cgettype,
@@ -1303,7 +1307,9 @@ const rv_opcode_data opcode_data[] = {
     [rv_op_csc] = { "csc", rv_codec_s, rv_fmt_cs2_offset_cs1, NULL, 0, 0, 0 },
     [rv_op_cincoffsetimm] = { "cincoffset", rv_codec_i, rv_fmt_cd_cs1_imm, NULL, 0, 0, 0 },
     [rv_op_csetboundsimm] = { "csetbounds", rv_codec_i, rv_fmt_cd_cs1_imm, NULL, 0, 0, 0 },
-
+    // Zero operand
+    [rv_op_modesw_cap] = { "modesw.cap", rv_codec_none, rv_fmt_none, NULL, 0, 0, 0 },
+    [rv_op_modesw_int] = { "modesw.int", rv_codec_none, rv_fmt_none, NULL, 0, 0, 0 },
     // Two operand
     [rv_op_cgetperm] = { "cgetperm", rv_codec_r, rv_fmt_rd_cs1, NULL, 0, 0, 0 },
     [rv_op_cgettype] = { "cgettype", rv_codec_r, rv_fmt_rd_cs1, NULL, 0, 0, 0 },
@@ -2003,6 +2009,8 @@ static void decode_inst_opcode(rv_decode *dec, rv_isa isa, int flags)
             case 45: op = rv_op_minu; break;
             case 46: op = rv_op_max; break;
             case 47: op = rv_op_maxu; break;
+            case 73:  op = rv_op_modesw_cap; break;
+            case 81:  op = rv_op_modesw_int; break;
             case 130: op = rv_op_sh1add; break;
             case 132: op = rv_op_sh2add; break;
             case 134: op = rv_op_sh3add; break;
