@@ -155,8 +155,8 @@ void HELPER(cspecialrw)(CPUArchState *env, uint32_t cd, uint32_t cs,
     }
     bool can_access_sysregs = cheri_have_access_sysregs(env);
     if (((is_write && scr_needs_asr_w(mode)) ||
-	 (is_read && scr_needs_asr_r(mode))) &&
-	!can_access_sysregs) {
+         (is_read && scr_needs_asr_r(mode))) &&
+        !can_access_sysregs) {
         raise_cheri_exception(env, CapEx_AccessSystemRegsViolation, 32 + index);
     }
     if (scr_min_priv(mode) > env->priv) {
