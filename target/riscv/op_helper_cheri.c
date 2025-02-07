@@ -124,7 +124,7 @@ struct SCRInfo {
     [CheriSCR_BSTCC] = {.r = true, .w = true, .access = H_ASR_RW, .name = "BSTCC"},
     [CheriSCR_BSTDC] = {.r = true, .w = true, .access = H_ASR_RW, .name = "BSTCC"},
     [CheriSCR_BSScratchC] = {.r = true, .w = true, .access = H_ASR_RW,
-                             .name= "BSTCC"},
+                             .name = "BSTCC"},
     [CheriSCR_BSEPCC] = {.r = true, .w = true, .access = H_ASR_RW, .name = "BSTCC"},
 };
 
