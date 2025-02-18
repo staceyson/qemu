@@ -53,7 +53,6 @@ static const MemMapEntry virt_memmap[] = {
     [VIRT_MROM] =        {     0x1000,        0xf000 },
     [VIRT_TEST] =        {   0x100000,        0x1000 },
     [VIRT_RTC] =         {   0x101000,        0x1000 },
-    [VIRT_IOCAP_KEYMNGR] = { 0x102000,        0x2000 },
     [VIRT_CLINT] =       {  0x2000000,       0x10000 },
     [VIRT_PCIE_PIO] =    {  0x3000000,       0x10000 },
     [VIRT_PLIC] =        {  0xc000000, VIRT_PLIC_SIZE(VIRT_CPUS_MAX * 2) },
@@ -63,6 +62,7 @@ static const MemMapEntry virt_memmap[] = {
     [VIRT_FLASH] =       { 0x20000000,     0x4000000 },
     [VIRT_PCIE_ECAM] =   { 0x30000000,    0x10000000 },
     [VIRT_PCIE_MMIO] =   { 0x40000000,    0x40000000 },
+    [VIRT_IOCAP_KEYMNGR]={ 0x50000000,        0x2000 },
     [VIRT_DRAM] =        { 0x80000000,           0x0 },
 };
 
