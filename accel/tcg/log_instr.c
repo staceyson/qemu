@@ -121,6 +121,7 @@ typedef struct cpu_log_instr_info {
     /* Generic instruction opcode buffer */
     int insn_size;
     char insn_bytes[TARGET_MAX_INSN_SIZE];
+    char *insn_disas_text; /* Only needed for text output format. */
 #define cpu_log_iinfo_endzero mem
     /*
      * For now we allow multiple accesses to be tied to one instruction.
@@ -349,8 +350,9 @@ static void emit_text_entry(CPUArchState *env, cpu_log_instr_info_t *iinfo)
     rcu_read_lock();
     logfile = qatomic_rcu_read(&qemu_logfile);
     if (logfile) {
-        target_disas_buf(logfile->fd, env_cpu(env), iinfo->insn_bytes,
-                         sizeof(iinfo->insn_bytes), iinfo->pc, 1);
+        fprintf(logfile->fd, "%s", iinfo->insn_disas_text);
+        free(iinfo->insn_disas_text);
+        iinfo->insn_disas_text = NULL;
     }
     rcu_read_unlock();
 
@@ -1058,6 +1060,18 @@ void qemu_log_instr(CPUArchState *env, target_ulong pc, const char *insn,
     iinfo->pc = pc;
     iinfo->insn_size = size;
     memcpy(iinfo->insn_bytes, insn, size);
+    if (qemu_log_instr_format == QLI_FMT_TEXT) {
+        /*
+         * We have to diassemble now, since instruction side-effects could
+         * change the CPU execution mode.
+         */
+        size_t disas_len = 0;
+        FILE *stream = open_memstream(&iinfo->insn_disas_text, &disas_len);
+        target_disas_buf(stream, env_cpu(env), iinfo->insn_bytes,
+                         iinfo->insn_size, iinfo->pc, 1);
+        fclose(stream);
+        /* Allocated buffer is freed in log_instr_emit(). */
+    }
 }
 
 void qemu_log_instr_asid(CPUArchState *env, uint16_t asid)
