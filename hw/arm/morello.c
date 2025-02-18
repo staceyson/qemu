@@ -37,9 +37,15 @@
 #include "hw/boards.h"
 #include "hw/loader.h"
 #include "hw/arm/boot.h"
+#include "hw/char/pl011.h"
+#include "hw/intc/arm_gic.h"
+#include "hw/intc/arm_gicv3_common.h"
+#include "hw/qdev-properties.h"
+#include "hw/sysbus.h"
 #include "cheri_tagmem.h"
 #include "sysemu/sysemu.h"
 #include "hw/arm/armtrickbox.h"
+#include "target/arm/kvm_arm.h"
 
 /* A basic morello board. There is no need to use this if only a morello CPU
  * is required (use the virt board instead). This board is designed to be a
@@ -48,10 +54,59 @@
 
 #define MORELLO_MAX_CPUS 4
 
+/* Number of external interrupt lines to configure the GIC with */
+#define NUM_IRQS 608
+
+/* Private peripheral interrupt (PPI) numbers. The first PPI is 0. */
+#define PPI_GIC_MAINT_IRQ    9
+#define PPI_TIMER_VIRT_IRQ   11
+#define PPI_TIMER_S_EL1_IRQ  13
+#define PPI_TIMER_NS_EL1_IRQ 14
+#define PPI_TIMER_NS_EL2_IRQ 10
+#define PPI_PMU_IRQ          7
+
+enum {
+    MORELLO_APUART0, /* AP Non-secure UART */
+    MORELLO_APUART1, /* AP Non-secure UART to the MCP */
+    MORELLO_APUART2, /* AP Secure UART */
+    MORELLO_GIC_DIST,
+    MORELLO_GIC_CPU,
+    MORELLO_GIC_V2M,
+    MORELLO_GIC_HYP,
+    MORELLO_GIC_VCPU,
+    MORELLO_GIC_ITS,
+    MORELLO_GIC_REDIST
+};
+
+static const MemMapEntry base_memmap[] = {
+    /* Non-secure AP UARTs */
+    [MORELLO_APUART0] =    { 0x2A400000, 0x00002000 },
+    [MORELLO_APUART1] =    { 0x2A410000, 0x00002000 },
+    /* Secure AP UART */
+    [MORELLO_APUART2] =    { 0x2A4B0000, 0x00002000 },
+    /* GIC distributor and CPU interfaces sit inside the CPU peripheral space */
+    [MORELLO_GIC_DIST] =   { 0x30000000, 0x00010000 },
+    [MORELLO_GIC_CPU] =    { 0x30010000, 0x00010000 },
+    [MORELLO_GIC_V2M] =    { 0x30020000, 0x00001000 },
+    [MORELLO_GIC_HYP] =    { 0x30030000, 0x00010000 },
+    [MORELLO_GIC_VCPU] =   { 0x30040000, 0x00010000 },
+    /* The space in between here is reserved for GICv3 CPU/vCPU/HYP */
+    [MORELLO_GIC_ITS] =    { 0x30080000, 0x00020000 },
+    /* This redistributor space allows up to 2*64kB*4 CPUs */
+    [MORELLO_GIC_REDIST] = { 0x300C0000, 0x00800000 },
+};
+
+static const int irqmap[] = {
+    [MORELLO_APUART0] = 63,
+    [MORELLO_APUART1] = 64,
+    [MORELLO_APUART2] = 55,
+};
+
 typedef struct MorelloMachineState {
     /*< private >*/
     MachineState parent_obj;
     /*< public >*/
+    DeviceState *gic;
     struct {
         ARMCPU core;
     } cpus[MORELLO_MAX_CPUS];
@@ -124,6 +179,114 @@ static MemoryRegion *create_mem_from_desc(MemoryRegion *parent,
     return mem;
 }
 
+static void create_its(MorelloMachineState *mms)
+{
+    const char *itsclass = its_class_name();
+    DeviceState *dev;
+
+    if (!itsclass) {
+        /* Do nothing if not supported */
+        return;
+    }
+
+    dev = qdev_new(itsclass);
+
+    object_property_set_link(OBJECT(dev), "parent-gicv3", OBJECT(mms->gic),
+                             &error_abort);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, base_memmap[MORELLO_GIC_ITS].base);
+}
+
+static void create_gic(MorelloMachineState *mms)
+{
+    /* We create a standalone GIC */
+    SysBusDevice *gicbusdev;
+    MachineState *machine = MACHINE(mms);
+    int i;
+    unsigned int smp_cpus = machine->smp.cpus;
+
+    mms->gic = qdev_new(gicv3_class_name());
+    qdev_prop_set_uint32(mms->gic, "revision", 3);
+    qdev_prop_set_uint32(mms->gic, "num-cpu", smp_cpus);
+    /* Note that the num-irq property counts both internal and external
+     * interrupts; there are always 32 of the former (mandated by GIC spec).
+     */
+    qdev_prop_set_uint32(mms->gic, "num-irq", GIC_INTERNAL + NUM_IRQS);
+    if (!kvm_irqchip_in_kernel()) {
+        qdev_prop_set_bit(mms->gic, "has-security-extensions", true);
+    }
+
+    uint32_t redist0_capacity =
+                base_memmap[MORELLO_GIC_REDIST].size / GICV3_REDIST_SIZE;
+    uint32_t redist0_count = MIN(smp_cpus, redist0_capacity);
+
+    qdev_prop_set_uint32(mms->gic, "len-redist-region-count", 1);
+    qdev_prop_set_uint32(mms->gic, "redist-region-count[0]", redist0_count);
+
+    gicbusdev = SYS_BUS_DEVICE(mms->gic);
+    sysbus_realize_and_unref(gicbusdev, &error_fatal);
+    sysbus_mmio_map(gicbusdev, 0, base_memmap[MORELLO_GIC_DIST].base);
+    sysbus_mmio_map(gicbusdev, 1, base_memmap[MORELLO_GIC_REDIST].base);
+
+    /* Wire the outputs from each CPU's generic timer and the GICv3
+     * maintenance interrupt signal to the appropriate GIC PPI inputs,
+     * and the GIC's IRQ/FIQ/VIRQ/VFIQ interrupt outputs to the CPU's inputs.
+     */
+    for (i = 0; i < smp_cpus; i++) {
+        DeviceState *cpudev = DEVICE(qemu_get_cpu(i));
+        int ppibase = NUM_IRQS + i * GIC_INTERNAL + GIC_NR_SGIS;
+        int irqn;
+        /* Mapping from the output timer irq lines from the CPU to the
+         * GIC PPI inputs.
+         */
+        const int timer_irq[] = {
+            [GTIMER_PHYS] = PPI_TIMER_NS_EL1_IRQ,
+            [GTIMER_VIRT] = PPI_TIMER_VIRT_IRQ,
+            [GTIMER_HYP]  = PPI_TIMER_NS_EL2_IRQ,
+            [GTIMER_SEC]  = PPI_TIMER_S_EL1_IRQ,
+        };
+
+        for (irqn = 0; irqn < ARRAY_SIZE(timer_irq); irqn++) {
+            qdev_connect_gpio_out(cpudev, irqn,
+                                  qdev_get_gpio_in(mms->gic,
+                                                   ppibase + timer_irq[irqn]));
+        }
+
+        qemu_irq irq = qdev_get_gpio_in(mms->gic,
+                                        ppibase + PPI_GIC_MAINT_IRQ);
+        qdev_connect_gpio_out_named(cpudev, "gicv3-maintenance-interrupt",
+                                    0, irq);
+
+        qdev_connect_gpio_out_named(cpudev, "pmu-interrupt", 0,
+                                    qdev_get_gpio_in(mms->gic, ppibase
+                                                     + PPI_PMU_IRQ));
+
+        sysbus_connect_irq(gicbusdev, i, qdev_get_gpio_in(cpudev, ARM_CPU_IRQ));
+        sysbus_connect_irq(gicbusdev, i + smp_cpus,
+                           qdev_get_gpio_in(cpudev, ARM_CPU_FIQ));
+        sysbus_connect_irq(gicbusdev, i + 2 * smp_cpus,
+                           qdev_get_gpio_in(cpudev, ARM_CPU_VIRQ));
+        sysbus_connect_irq(gicbusdev, i + 3 * smp_cpus,
+                           qdev_get_gpio_in(cpudev, ARM_CPU_VFIQ));
+    }
+
+    create_its(mms);
+}
+
+static void create_uart(const MorelloMachineState *mms, int uart,
+                        MemoryRegion *mem, Chardev *chr)
+{
+    hwaddr base = base_memmap[uart].base;
+    int irq = irqmap[uart];
+    DeviceState *dev = qdev_new(TYPE_PL011);
+    SysBusDevice *s = SYS_BUS_DEVICE(dev);
+
+    qdev_prop_set_chr(dev, "chardev", chr);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
+    memory_region_add_subregion(mem, base, sysbus_mmio_get_region(s, 0));
+    sysbus_connect_irq(s, 0, qdev_get_gpio_in(mms->gic, irq));
+}
+
 static void morello_machine_init(MachineState *machine)
 {
     MorelloMachineState *morelloMachineState = MORELLO_MACHINE(machine);
@@ -189,6 +352,19 @@ static void morello_machine_init(MachineState *machine)
             assert(0);
         }
     }
+
+    /* Add GIC */
+    create_gic(morelloMachineState);
+
+    /* Add non-secure UARTs */
+    MemoryRegion *sysmem = get_system_memory();
+    create_uart(morelloMachineState, MORELLO_APUART0, sysmem, serial_hd(0));
+    create_uart(morelloMachineState, MORELLO_APUART1, sysmem, serial_hd(1));
+
+    /* Add secure UART */
+    create_uart(morelloMachineState, MORELLO_APUART2,
+                seperate_s_ns ? secure_memory : sysmem,
+                serial_hd(2));
 
     /* Create the trickbox used for testing */
     SysBusDevice *trickbox = arm_trickbox_mm_init_default();
