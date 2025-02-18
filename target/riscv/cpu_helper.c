@@ -884,7 +884,15 @@ restart:
                 *prot |= PAGE_EXEC;
             }
             /* add write permission on stores or if the page is already dirty,
-               so that we TLB miss on later writes to update the dirty bit */
+               so that we TLB miss on later writes to update the dirty bit.
+
+               This test could be equivalently written as
+                 (pte & (PTE_W | PTE_D)) == (PTE_W | PTE_D)
+               because MMU_DATA_STORE / MMU_DATA_CAP_STORE accesses will reach
+               this point only if PTE_W and PTE_D are both already set prior to
+               this get_physical_address call or PTE_W was already set and PTE_D
+               has just been set above.
+             */
             if ((pte & PTE_W) &&
                 ((access_type == MMU_DATA_STORE) ||
                  (access_type == MMU_DATA_CAP_STORE) || (pte & PTE_D))) {
@@ -910,7 +918,15 @@ restart:
                     }
                 }
             }
-            if ((pte & PTE_CW) == 0) {
+
+            /*
+             * Flag this TLB entry as requiring a trap on cap-store if either
+             * CD or CW is clear, paralleling the existing logic around W and D
+             * above.  As with PTE_D, the (CHERI-augmented) TCG TLB logic will
+             * translate again during a cap store before actually trapping,
+             * giving us an opportunity to set CD.
+             */
+            if ((pte & (PTE_CD | PTE_CW)) != (PTE_CD | PTE_CW)) {
                 *prot |= PAGE_SC_TRAP;
             }
 #endif
