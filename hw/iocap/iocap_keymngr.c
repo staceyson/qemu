@@ -12,39 +12,46 @@
 
 static IOCapKeymngrState* singleton_iocap_keymngr = NULL;
 
-static uint64_t iocap_keymngr_read(void *opaque, hwaddr addr, unsigned size)
+static MemTxResult iocap_keymngr_read(void *opaque,
+                                   hwaddr addr,
+                                   uint64_t *data,
+                                   unsigned size,
+                                   MemTxAttrs attrs)
 {
     IOCapKeymngrState *s = opaque;
 
-    if (size > 8 || (addr % 8) + size > 8) {
-        // Too-big access or
+    if (size != 8 || (addr % 8) + size > 8) {
+        // Incorrect access size or
         // Crossing an 8-byte boundary access
-        return 0;
+        return MEMTX_ERROR;
     }
 
     if (addr < 0x1000 && (addr % 16) == 0) {
         // Read key status
         hwaddr key_index = addr >> 4;
-        return s->key_en[key_index];
+        *data = s->key_en[key_index];
+        return MEMTX_OK;
     } else if (addr >= 0x1000 && addr + size <= 0x1020) {
         // Read performance counters
         uint64_t out = 0;
         for (unsigned i = 0; i < size; i++)
             out |= (s->perf_bytes[addr - 0x1000 + i] << (i * 8));
-        return out;
+        *data = out;
+        return MEMTX_OK;
     } else {
-        return 0;
+        // Invalid address
+        return MEMTX_DECODE_ERROR;
     }
 }
 
-static void iocap_keymngr_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
+static MemTxResult iocap_keymngr_write(void *opaque, hwaddr addr, uint64_t data, unsigned size, MemTxAttrs attrs)
 {
     IOCapKeymngrState *s = opaque;
 
-    if (size > 8 || (addr % 8) + size > 8) {
-        // Too-big access or
+    if (size != 8 || (addr % 8) + size > 8) {
+        // Incorrect access size or
         // Crossing an 8-byte boundary access
-        return;
+        return MEMTX_ERROR;
     }
 
     if (addr < 0x1000 && (addr % 16) == 0) {
@@ -80,18 +87,21 @@ static void iocap_keymngr_write(void *opaque, hwaddr addr, uint64_t data, unsign
         // }
 
         s->key_en[key_index] = enabling_key;
+        return MEMTX_OK;
     } else if (addr < 0x2000) {
         for (int b = 0; b < size; b++) {
             s->key_data[addr - 0x1000 + b] = (data >> (b * 8)) & 0xFF;
         }
+        return MEMTX_OK;
     } else {
         // Invalid address
+        return MEMTX_DECODE_ERROR;
     }
 }
 
 static const MemoryRegionOps iocap_keymngr_ops = {
-    .read = iocap_keymngr_read,
-    .write = iocap_keymngr_write,
+    .read_with_attrs = iocap_keymngr_read,
+    .write_with_attrs = iocap_keymngr_write,
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
